@@ -46,6 +46,7 @@ Because provider selection happens in the browser, this works with every provide
 | **[docs/FEATURES.md](docs/FEATURES.md)** | **The backlog.** 24 work items in 5 phases, with acceptance criteria, dependencies, and a parallelisation graph. Start here to contribute. |
 | [docs/ACP-INTEGRATION.md](docs/ACP-INTEGRATION.md) | The protocol contract to implement — handshake, session lifecycle, streaming updates, extensions, reconnect/replay |
 | [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) | Sign-in design: device flow relayed through the app, bridge pairing, token storage, auth state machine |
+| [docs/VISUAL-LANGUAGE.md](docs/VISUAL-LANGUAGE.md) | **The look.** Colour tokens, type scale, shape, motion and per-screen hints, steered onto Kiro Crew's aesthetic rather than Kiro IDE's or Web's |
 | [ADR-001](docs/adr/ADR-001-cloud-session-access.md) | **How the app reaches cloud sessions.** The constraint above, options considered, and the six assumptions that must be verified before building |
 | [ADR-002](docs/adr/ADR-002-react-native-vs-native.md) | React Native vs. native Kotlin/Compose. Recommends native (high confidence) with explicit flip conditions |
 | [ADR-003](docs/adr/ADR-003-tech-stack.md) | Stack, module layout, and the conventions that keep parallel work coherent |
