@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only. The release manifest carries no such override, so a shipped
+  build still refuses cleartext everywhere. This exists purely so a debug
+  build can pair against a `ws://` bridge on a local network or an emulator's
+  host loopback (10.0.2.2) during development, without every tester needing
+  their own TLS certificate for a bridge they are running on a laptop.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

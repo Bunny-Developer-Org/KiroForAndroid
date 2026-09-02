@@ -89,13 +89,41 @@ class InMemoryDriftMetrics : DriftMetrics {
     )
 }
 
-/** Bridges are a list, not a single host — see [PairedBridge]. */
-class DataStoreBridgeRegistry(private val context: Context) : BridgeRegistry {
+/**
+ * A single named string slot.
+ *
+ * [DataStoreBridgeRegistry] only ever needs to read and overwrite one JSON
+ * blob, and every real [Preferences] instance is constructed through a Kotlin
+ * `internal` API of the datastore library — unreachable from a plain JVM unit
+ * test with no Robolectric or instrumentation. Depending on this narrow seam
+ * instead of on [DataStore] directly means the round-trip logic can be pinned
+ * against an in-memory fake with no Android or DataStore types involved at all.
+ */
+interface StringStore {
+    suspend fun read(): String?
+    suspend fun write(value: String)
+}
 
-    private val key = stringPreferencesKey("bridges")
+/** The real [StringStore], backed by Jetpack DataStore Preferences. */
+class DataStorePreferenceStringStore(
+    private val store: DataStore<Preferences>,
+    private val key: Preferences.Key<String>,
+) : StringStore {
+    override suspend fun read(): String? = store.data.first()[key]
+    override suspend fun write(value: String) {
+        store.edit { it[key] = value }
+    }
+}
+
+/** Bridges are a list, not a single host — see [PairedBridge]. */
+class DataStoreBridgeRegistry(private val stringStore: StringStore) : BridgeRegistry {
+
+    constructor(context: Context) : this(
+        DataStorePreferenceStringStore(context.bridgeDataStore, stringPreferencesKey("bridges")),
+    )
 
     override suspend fun list(): List<PairedBridge> {
-        val raw = context.bridgeDataStore.data.first()[key] ?: return emptyList()
+        val raw = stringStore.read() ?: return emptyList()
         val array = runCatching { AcpJson.parseToJsonElement(raw) as? JsonArray }.getOrNull()
             ?: return emptyList()
         return array.mapNotNull { element ->
@@ -138,7 +166,7 @@ class DataStoreBridgeRegistry(private val context: Context) : BridgeRegistry {
                 )
             }
         }.toString()
-        context.bridgeDataStore.edit { it[key] = encoded }
+        stringStore.write(encoded)
     }
 
     private fun JsonObject.string(name: String): String? =

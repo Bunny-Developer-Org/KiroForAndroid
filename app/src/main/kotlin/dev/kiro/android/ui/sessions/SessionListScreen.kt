@@ -13,9 +13,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,11 +50,13 @@ fun SessionListScreen(
     connection: ConnectionState,
     onOpen: (CloudSession) -> Unit,
     onNewSession: () -> Unit,
+    onManageBridges: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = KiroTheme.colors
 
     Column(modifier.fillMaxSize().background(colors.bg)) {
+        SessionListTopBar(onManageBridges)
         ConnectionBanner(connection)
 
         NewSessionAction(
@@ -74,6 +80,35 @@ fun SessionListScreen(
                     HorizontalDivider(color = colors.border, thickness = 1.dp)
                 }
             }
+        }
+    }
+}
+
+/**
+ * The one place this screen reaches out of the session graph.
+ *
+ * Bridge management (F-07) lives above sessions/create/transcript rather than
+ * inside [dev.kiro.android.ui.Screen] -- switching bridges reconnects the whole
+ * gateway, which is a concern of `AppRoot`, not of navigation between the three
+ * session-flow destinations.
+ */
+@Composable
+private fun SessionListTopBar(onManageBridges: () -> Unit) {
+    val colors = KiroTheme.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = KiroLayout.ScreenGutter),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "Sessions",
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.titleMedium,
+            color = colors.textStrong,
+        )
+        IconButton(onClick = onManageBridges) {
+            Icon(Icons.Filled.Settings, contentDescription = "Manage bridges", tint = colors.muted)
         }
     }
 }

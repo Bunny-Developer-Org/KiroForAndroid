@@ -37,7 +37,11 @@ import dev.kiro.core.session.SessionLimitReachedException
 import kotlinx.coroutines.launch
 
 @Composable
-fun AppNavigation(gateway: CloudSessionGateway, connection: ConnectionState) {
+fun AppNavigation(
+    gateway: CloudSessionGateway,
+    connection: ConnectionState,
+    onManageBridges: () -> Unit = {},
+) {
     var screen by remember { mutableStateOf<Screen>(Screen.Sessions) }
     var sessions by remember { mutableStateOf<List<CloudSession>>(emptyList()) }
 
@@ -60,6 +64,7 @@ fun AppNavigation(gateway: CloudSessionGateway, connection: ConnectionState) {
             connection = connection,
             onOpen = { screen = Screen.Transcript(it) },
             onNewSession = { screen = Screen.Create },
+            onManageBridges = onManageBridges,
         )
 
         Screen.Create -> CreateScreenHost(gateway) { created ->
