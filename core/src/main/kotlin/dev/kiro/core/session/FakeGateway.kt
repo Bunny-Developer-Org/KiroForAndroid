@@ -67,6 +67,15 @@ public class FakeGateway(
         _connection.value = ConnectionState.Unreachable(lastSeenMillis, workstationOnly)
     }
 
+    /**
+     * Raises a `_kiro/userInput` question without a real bridge, so the card can
+     * be built and tested against this gateway exactly as the scripted turn
+     * already lets [ApprovalCard] be.
+     */
+    public suspend fun simulateUserInput(request: UserInputRequest) {
+        _userInput.emit(request)
+    }
+
     override suspend fun listSessions(source: SessionSource, scope: ListScope): List<CloudSession> =
         sessions.filter { source == SessionSource.ALL || it.source == source }
 
@@ -180,7 +189,14 @@ public class FakeGateway(
         )
     }
 
-    override suspend fun respondToUserInput(sessionId: String, toolCallId: String, answer: String?): Unit = Unit
+    override suspend fun respondToUserInput(sessionId: String, toolCallId: String, answer: String?) {
+        // Mirrors respondToPermission: emitted as a resolution so any other
+        // collector of `updates` (including another attached client, in the real
+        // gateway) sees the question close out rather than staying pending.
+        _updates.emit(
+            SessionUpdate.InteractionResolved(sessionId, toolCallId, "answered", answer),
+        )
+    }
 
     override suspend fun deleteSession(sessionId: String) {
         sessions.removeAll { it.id == sessionId }
