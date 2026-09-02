@@ -1,6 +1,8 @@
 package dev.kiro.bridge
 
 import java.io.File
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * How the bridge was told to run.
@@ -34,6 +36,19 @@ public data class BridgeConfig(
      */
     val workingDirectory: File = File(System.getProperty("java.io.tmpdir"), "kiro-bridge-workspace"),
     val replayBufferSize: Int = DEFAULT_REPLAY_BUFFER,
+    /**
+     * How often `/acp` sends a WebSocket ping.
+     *
+     * A client that goes silently dead -- a dropped network, or (seen in the
+     * field) a stale `adb forward` -- never sends a close frame and, unlike a
+     * crash or a clean shutdown, never triggers a TCP FIN or RST either. With
+     * no heartbeat, that connection just sits in the roster forever: nothing
+     * ever throws on `incoming`, so `clients` only grows. This, paired with
+     * [webSocketPongTimeout], is what actually reaps it.
+     */
+    val webSocketPingPeriod: Duration = 20.seconds,
+    /** How long `/acp` waits for a pong before giving up on a ping and closing. */
+    val webSocketPongTimeout: Duration = 15.seconds,
 ) {
 
     val isLoopbackOnly: Boolean get() = bindAddress == LOOPBACK || bindAddress == "localhost"

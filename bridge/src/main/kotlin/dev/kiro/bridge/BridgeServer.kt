@@ -22,6 +22,8 @@ import io.ktor.server.request.header
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets
+import io.ktor.server.websocket.pingPeriod
+import io.ktor.server.websocket.timeout
 import io.ktor.server.websocket.webSocket
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
@@ -58,13 +60,22 @@ public class BridgeServer(
     private val sessionLog = SessionLog(config.replayBufferSize)
     private val clients = java.util.concurrent.CopyOnWriteArrayList<ClientConnection>()
 
+    /** Test-only window into the roster. No production caller needs this. */
+    internal val clientCount: Int get() = clients.size
+
     private class ClientConnection(val send: suspend (String) -> Unit)
 
     public fun start(wait: Boolean = true) {
         config.validate()
 
         val server = embeddedServer(CIO, port = config.port, host = config.bindAddress) {
-            install(WebSockets)
+            install(WebSockets) {
+                // See BridgeConfig.webSocketPingPeriod: without this, a client
+                // whose connection goes silently dead is never noticed, and
+                // `clients` only ever grows.
+                pingPeriod = config.webSocketPingPeriod
+                timeout = config.webSocketPongTimeout
+            }
             routing { installRoutes() }
         }
 
