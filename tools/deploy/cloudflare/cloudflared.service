@@ -1,0 +1,27 @@
+# systemd unit for running `cloudflared` alongside a bridge on the same host
+# (e.g. the GCE VM tools/deploy/gcp/deploy.sh provisions).
+#
+# Install:
+#   sudo cp tools/deploy/cloudflare/cloudflared.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now cloudflared
+#
+# Assumes setup-tunnel.sh already ran as the `cloudflared` user shown below
+# and left ~/.cloudflared/config.yml + ~/.cloudflared/<TUNNEL_ID>.json in
+# place. Adjust User= and the --config path if you ran it as someone else.
+[Unit]
+Description=Cloudflare Tunnel for the kiro-bridge
+After=network-online.target kiro-bridge.service
+Wants=network-online.target
+Requires=kiro-bridge.service
+
+[Service]
+Type=simple
+User=cloudflared
+ExecStart=/usr/local/bin/cloudflared tunnel --config /home/cloudflared/.cloudflared/config.yml run
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

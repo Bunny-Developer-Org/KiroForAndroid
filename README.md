@@ -58,6 +58,8 @@ By default it binds `127.0.0.1`, and it **refuses to start** on any other addres
 
 To provision it without an interactive login, set `KIRO_API_KEY`. One caveat worth knowing: that variable overrides whatever account the CLI is signed in as, and there is no flag to suppress it.
 
+Want it always on instead of on your laptop? [docs/HOSTING.md](docs/HOSTING.md) covers a free Google Cloud VM and Cloudflare Tunnel, with scripts under [tools/deploy/](tools/deploy/).
+
 ## Documents — read the ADRs, not just this file
 
 The [ADRs](docs/adr/) are this project's real accumulated knowledge, not design notes written in advance of the work. Several record findings **verified against a real `kiro-cli` and a real Kiro account** — protocol behavior the published docs get wrong, assumptions confirmed or refuted with captured traffic, not guessed. If you want to understand *why* the app is shaped the way it is — why there's a bridge at all, why native over React Native, how a repository gets picked with no API to list them — the ADRs are where that reasoning actually lives.

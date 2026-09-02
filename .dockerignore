@@ -1,0 +1,13 @@
+# Keep the bridge's Docker build context small. The Dockerfile needs the
+# whole repo (Gradle configures every module in settings.gradle.kts even when
+# building a single :bridge target), but none of these generated or
+# VCS-only directories, which are the bulk of the repo's on-disk size.
+.git/
+.gradle/
+.kotlin/
+build/
+*/build/
+*/*/build/
+local.properties
+*.iml
+.idea/
