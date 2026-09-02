@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ADR-003 §4: AGP rejects JDK 22+, and a runner's default JDK is not a
+      # promise. Pin it explicitly rather than inheriting whatever is installed.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # ADR-003's one hard rule, checked first and on its own so a violation is
+      # reported as "core/ took an Android dependency" rather than buried in a
+      # 400-line build log.
+      - name: core/ purity (no android.* or androidx.* imports)
+        run: ./gradlew :core:corePurityCheck
+
+      - name: Static analysis
+        run: ./gradlew detekt
+
+      - name: Unit tests
+        run: ./gradlew :core:test :bridge:test
+
+      - name: Assemble
+        run: ./gradlew :app:assembleDebug :bridge:installDist
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: '**/build/reports/**'

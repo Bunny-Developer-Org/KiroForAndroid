@@ -1,19 +1,6 @@
-# Gradle / Android (for when F-02 lands the scaffold)
 .gradle/
 build/
 local.properties
-*.apk
-*.aab
-*.keystore
-*.jks
-
-# IDE
-.idea/
 *.iml
+.idea/
 .kotlin/
-
-# Bridge (F-03)
-node_modules/
-
-# OS
-.DS_Store

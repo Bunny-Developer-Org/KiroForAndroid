@@ -1,0 +1,52 @@
+# Deliberately small. The point of a linter on a young codebase is to catch the
+# handful of things that are genuinely load-bearing here, not to generate a
+# backlog of style opinions on day one. Add rules when one of them actually
+# catches a bug.
+
+build:
+  maxIssues: 0
+
+complexity:
+  LongMethod:
+    active: true
+    threshold: 80
+  LongParameterList:
+    active: false
+  TooManyFunctions:
+    active: false
+  CyclomaticComplexMethod:
+    active: true
+    threshold: 20
+
+exceptions:
+
+  # Tolerant parsing is a project-wide requirement (ADR-003 §3): an unknown
+  # frame must be logged and dropped, never fatal. That means catching broadly
+  # at the protocol boundary, on purpose.
+  TooGenericExceptionCaught:
+    active: false
+  SwallowedException:
+    active: false
+
+style:
+  # A protocol call has three genuinely distinct failure modes -- the transport
+  # refused it, the agent never answered, the agent answered with an error -- and
+  # collapsing them loses the distinction the UI needs to say something useful.
+  ThrowsCount:
+    active: true
+    max: 3
+  MaxLineLength:
+    active: true
+    maxLineLength: 120
+    excludeCommentStatements: true
+  ReturnCount:
+    active: false
+  MagicNumber:
+    active: false
+  UnusedPrivateMember:
+    active: true
+
+naming:
+  FunctionNaming:
+    # @Composable functions are PascalCase by convention.
+    ignoreAnnotated: ['Composable']
