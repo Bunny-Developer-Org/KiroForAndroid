@@ -209,6 +209,21 @@ Remaining for F-01's follow-up: confirm A8 with an actual `session/new` bound to
 
 ---
 
+## 7a. Update, 2026-09-02: `cwd` still carries no meaning, but `session/new` now requires a well-formed one
+
+This ADR's finding that a cloud session has no working directory (§2.2, §3) still
+holds. What changed is a validation detail one layer down: `kiro-cli`'s
+`session/new` used to accept `cwd: ""` and now rejects it with `Invalid params:
+cwd must be an absolute path`. Any absolute path — `/`, `/tmp`, `/workspace` —
+is accepted identically, so this is a shape check on the request, not evidence
+that the value does anything for a cloud session. `BridgeGateway.createSession()`
+now sends a fixed placeholder instead of an empty string; see
+[PROTOCOL-FINDINGS §4c](../PROTOCOL-FINDINGS.md#4c-sessionnew-now-requires-an-absolute-cwd-even-for-a-cloud-session--verified-and-fixed)
+for the evidence. `session/load` was checked too and does not enforce this —
+only `session/new` tightened.
+
+---
+
 ## 8. Consequences
 
 - **F-01** gains four concrete experiments (A7–A12 above) and loses the vague "determine how repositories are bound programmatically."

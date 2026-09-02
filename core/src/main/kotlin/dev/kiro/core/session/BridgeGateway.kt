@@ -229,9 +229,15 @@ public class BridgeGateway(
     override suspend fun createSession(request: CreateSessionRequest): CloudSession {
         val params = buildJsonObject {
             // ADR-004: a cloud session has no working directory, no checkout and no
-            // local git. The empty cwd is not an oversight — the repositories below
-            // are what the sandbox clones.
-            put("cwd", "")
+            // local git — the repositories below are what the sandbox clones, not
+            // this value. `cwd` used to be sent empty on that basis, but the live
+            // server now rejects that: `session/new` answers `Invalid params: cwd
+            // must be an absolute path` (PROTOCOL-FINDINGS §4c, verified 2026-09-02
+            // against KAS 0.52.1). The server still never uses it for a cloud
+            // session — `/`, `/tmp` and `/workspace` all created sessions
+            // identically — so this is a placeholder to satisfy validation, not a
+            // meaningful path.
+            put("cwd", PLACEHOLDER_CWD)
             put("mcpServers", buildJsonArray { })
             request.modeId?.let { put("agentMode", it) }
             putKiroMeta {
@@ -283,6 +289,10 @@ public class BridgeGateway(
             AcpMethods.SESSION_LOAD,
             buildJsonObject {
                 put("sessionId", sessionId)
+                // Unlike session/new (see createSession above), session/load does not
+                // enforce cwd as an absolute path — verified live 2026-09-02 against
+                // the same KAS 0.52.1 server, loading a session immediately after
+                // creating it. An empty cwd here is not the same bug; leave it.
                 put("cwd", "")
                 put("mcpServers", buildJsonArray { })
                 putKiroMeta { put("sessionSource", source.wire) }
@@ -413,6 +423,17 @@ public class BridgeGateway(
         _connection.value = ConnectionState.Disconnected
     }
 }
+
+/**
+ * What `session/new` gets for `cwd` on a cloud session.
+ *
+ * Any absolute path satisfies the live server's validation identically — `/`,
+ * `/tmp` and `/workspace` all created a session with no observable difference
+ * (PROTOCOL-FINDINGS §4c). `/` is used because it makes no claim about a
+ * filesystem this app never has: not a repo checkout, not a real workspace, just
+ * the shortest string that is unambiguously an absolute path.
+ */
+private const val PLACEHOLDER_CWD: String = "/"
 
 /**
  * Turns a JSON-RPC error into something the UI can say a useful sentence about.

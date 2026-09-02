@@ -231,6 +231,54 @@ A server-issued `requestId` and `faultKind: "serviceRejection"` mean the key was
 
 ---
 
+## 4c. `session/new` now requires an absolute `cwd`, even for a cloud session · **VERIFIED, and fixed**
+
+**Run:** 2026-09-02 (third session, same host) · same `kiro-cli 2.19.2` / KAS 0.52.1.
+
+ADR-004 concluded that a cloud session has no meaningful working directory — the
+sandbox clones the bound repositories server-side, not the bridge host — and the
+app's `BridgeGateway.createSession()` sent `cwd: ""` on that basis. The live
+server no longer accepts that. Driving the real `BridgeGateway.createSession()`
+end to end (empty `repositories`, and separately with a real repo attached — same
+result either way) got:
+
+```json
+{"code":-32602,"message":"Invalid params: cwd must be an absolute path"}
+```
+
+This blocked **every** cloud session creation through the app, independent of and
+prior to the same-day WebSocket-handshake-race fix.
+
+**What the live server actually wants, checked by driving `AcpClient`/
+`WebSocketAcpTransport` directly against a real bridge with several candidate
+`params.cwd` values on `session/new`:**
+
+| `cwd` value | Result |
+|---|---|
+| `""` (empty string) | Rejected — `Invalid params: cwd must be an absolute path` |
+| omitted entirely | Rejected — `Invalid params` (the field is required) |
+| `"/"` | **Created a session** (`sessionId` returned) |
+| `"/workspace"` | **Created a session**, no observable difference from `"/"` |
+| `"/tmp"` | **Created a session**, no observable difference from `"/"` |
+
+Any absolute path satisfies validation identically — the server does not appear
+to use the value for a cloud session at all, consistent with ADR-004's finding
+that binding and cloning are entirely repository-name-driven. `session/new` just
+now enforces the *shape* of `cwd` (absolute path) unconditionally, where it
+previously accepted an empty string.
+
+**`session/load` does not have the same requirement.** Loading a session
+immediately after creating it, with `params.cwd` sent as `""`, succeeded — no
+error, same as before this investigation started. Only `session/new` tightened.
+
+**Fix:** `BridgeGateway.createSession()` now sends a fixed placeholder,
+`PLACEHOLDER_CWD = "/"`, instead of `""`. `loadSession()` is unchanged. ADR-004's
+"no meaningful working directory" conclusion still holds — this is a protocol
+validation quirk on `session/new`, not a reason to believe cwd carries meaning
+for a cloud session. See `BridgeGateway.kt` for the code-level comment.
+
+---
+
 ## 5. Corrections to the documented protocol
 
 The [ACP page](https://kiro.dev/docs/cli/acp/) names four streaming update kinds. The real stream is larger and differently spelled.
