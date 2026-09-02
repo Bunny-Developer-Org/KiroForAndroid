@@ -112,9 +112,21 @@ class TranscriptViewModel(
         _state.value = next
     }
 
-    fun send(text: String) {
+    /**
+     * Sends a turn made of optional text plus an optional attached image.
+     *
+     * At least one of [text]/[image] should be non-empty for this to be a
+     * meaningful turn, but that's the composer's call to enforce (it disables
+     * the send button); this just builds whichever blocks are present.
+     */
+    fun send(text: String, image: PromptBlock.Image? = null) {
+        val blocks = listOfNotNull(
+            PromptBlock.Text(text).takeIf { text.isNotBlank() },
+            image,
+        )
+        if (blocks.isEmpty()) return
         viewModelScope.launch {
-            gateway.prompt(sessionId, listOf(PromptBlock.Text(text)))
+            gateway.prompt(sessionId, blocks)
         }
     }
 

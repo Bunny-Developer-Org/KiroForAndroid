@@ -72,9 +72,12 @@ fun AppNavigation(
             screen = Screen.Transcript(created)
         }
 
-        is Screen.Transcript -> TranscriptHost(gateway, current.session) {
-            screen = Screen.Sessions
-        }
+        is Screen.Transcript -> TranscriptHost(
+            gateway = gateway,
+            session = current.session,
+            supportsImages = (connection as? ConnectionState.Connected)?.supportsImages ?: false,
+            onBack = { screen = Screen.Sessions },
+        )
     }
 }
 
@@ -82,6 +85,7 @@ fun AppNavigation(
 private fun TranscriptHost(
     gateway: CloudSessionGateway,
     session: CloudSession,
+    supportsImages: Boolean,
     @Suppress("UNUSED_PARAMETER") onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -138,6 +142,7 @@ private fun TranscriptHost(
             onSend = viewModel::send,
             onCancel = viewModel::cancel,
             turnActive = state.isTurnActive,
+            supportsImages = supportsImages,
         )
     }
 }
