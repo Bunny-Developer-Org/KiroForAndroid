@@ -1,10 +1,12 @@
 # KiroForAndroid
 
-An unofficial Android client for [Kiro](https://kiro.dev) **cloud sessions** — agent runs that live in a managed cloud sandbox and keep working after the client disconnects. Kiro ships an iOS app and no Android one.
+An unofficial Android client for [Kiro](https://kiro.dev) **cloud sessions** — agent runs that live in a managed cloud sandbox and keep working after the client disconnects. Kiro ships an iOS app and no Android one, publishes no third-party API, and has three open feature requests asking for exactly this that nobody has committed to (tracked in [F-00](docs/FEATURES.md)). That gap is the whole reason this project exists.
 
-**Status: early. It builds, it talks to a real `kiro-cli`, and it is not finished.** See [docs/FEATURES.md](docs/FEATURES.md) for what is done, partial, and untouched.
+## Status, at a glance
 
----
+Of the 26 items in [docs/FEATURES.md](docs/FEATURES.md): **7 done, 5 partial, the rest not started.** Done: project scaffold/CI, the ACP protocol layer, the session gateway, credential storage, session list (delete/pin), the prompt composer. Partial: bridge pairing (multi-bridge list works, QR scan doesn't), the new-session flow, transcript rendering, permission/approval UI, and reconnect/replay hardening.
+
+**The one caveat that matters more than any of those markers:** everything above was built and verified against `FakeGateway` or a local `kiro-cli` session. **Nothing has yet been exercised against a real, paid cloud-session creation** — that costs credits, and none have been spent. Session creation, the approval round-trip, and reconnect-mid-turn replay are the three biggest remaining unknowns, and they're exactly the parts a phone client can't fake its way past.
 
 ## The thing to understand first
 
@@ -56,7 +58,9 @@ By default it binds `127.0.0.1`, and it **refuses to start** on any other addres
 
 To provision it without an interactive login, set `KIRO_API_KEY`. One caveat worth knowing: that variable overrides whatever account the CLI is signed in as, and there is no flag to suppress it.
 
-## Documents
+## Documents — read the ADRs, not just this file
+
+The [ADRs](docs/adr/) are this project's real accumulated knowledge, not design notes written in advance of the work. Several record findings **verified against a real `kiro-cli` and a real Kiro account** — protocol behavior the published docs get wrong, assumptions confirmed or refuted with captured traffic, not guessed. If you want to understand *why* the app is shaped the way it is — why there's a bridge at all, why native over React Native, how a repository gets picked with no API to list them — the ADRs are where that reasoning actually lives.
 
 Read in this order:
 
@@ -68,6 +72,12 @@ Read in this order:
 | [ADR-004](docs/adr/ADR-004-work-repo-selection.md) · [ADR-005](docs/adr/ADR-005-bridge-hosting-and-availability.md) | How repositories are bound; where the bridge runs and what happens when it does not. |
 | [ACP-INTEGRATION](docs/ACP-INTEGRATION.md) · [AUTHENTICATION](docs/AUTHENTICATION.md) | The protocol and sign-in contracts. |
 | [VISUAL-LANGUAGE](docs/VISUAL-LANGUAGE.md) | So ten screens look like one app. |
+| [PRIOR-ART](docs/PRIOR-ART.md) | What other unofficial Kiro clients got right and wrong, and what this project borrowed or deliberately didn't. |
+| [FEATURES](docs/FEATURES.md) | The backlog, with per-item status — the freshest source of truth for what's done. |
+
+## License
+
+MIT. See [LICENSE](LICENSE).
 
 ## Unaffiliated
 

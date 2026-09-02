@@ -1,6 +1,6 @@
 # ADR-003: Tech stack and module layout
 
-- **Status:** Proposed
+- **Status:** Accepted, and implemented — verified against the real `gradle/libs.versions.toml`, module structure, and CI config as of 2026-09-02 (see §1/§2 notes below for the two version numbers that have since moved).
 - **Date:** 2026-09
 - **Depends on:** [ADR-001](ADR-001-cloud-session-access.md) (topology), [ADR-002](ADR-002-react-native-vs-native.md) (runtime = native Kotlin/Compose)
 
@@ -14,7 +14,7 @@ This ADR pins the concrete stack so that feature work items can name packages an
 |---|---|---|
 | Language | **Kotlin 2.4.10** | Was "2.0.x". Kotlin 2.0 cannot drive AGP 9, and AGP 9 is what the current SDK requires. Corrected by F-02. |
 | UI | Jetpack Compose + Material 3 | Compose BOM, so individual artifact versions stay aligned |
-| Min / target / compile SDK | **26 / 36 / 36** | minSdk 26 unchanged — it keeps adaptive icons and modern crypto available and covers effectively the whole active device base. 35 → 36 because AGP 9.4 is the current toolchain. |
+| Min / target / compile SDK | **26 / 37 / 37** | minSdk 26 unchanged — it keeps adaptive icons and modern crypto available and covers effectively the whole active device base. Target/compile have moved twice since this ADR was written (35 → 36 → 37, current as of `gradle/libs.versions.toml`); this row is corrected in place rather than tracked with a changelog, since the number itself carries no design decision. |
 | Android Gradle Plugin | **9.4.0** | **AGP 9 applies the Kotlin plugin itself.** Adding `org.jetbrains.kotlin.android` alongside it is now a hard error, not a redundancy — the first thing F-02 hit. |
 | Gradle | **9.7.1**, via the committed wrapper | |
 | JDK for the build | **17 or 21** | AGP does not support JDK 22+. The sandbox default is JDK 25, so CI and local builds must pin `JAVA_HOME`. This bites immediately; see §4. `core/` and `bridge/` emit **Java 17 bytecode** whichever of the two runs the build, rather than demanding a JDK 17 toolchain that may not be installed. |
@@ -47,6 +47,8 @@ KiroForAndroid/
 └── bridge/       Host-side bridge process (ADR-001 Option B).
                  Runs where kiro-cli lives. Not shipped in the APK.
 ```
+
+There is also a `tools/` directory at the repo root (`tools/acp-probe/`, plus device/emulator run scripts). It is not a Gradle module — it doesn't appear in `settings.gradle.kts` — but it is the harness that produced the fixtures in [PROTOCOL-FINDINGS.md](../PROTOCOL-FINDINGS.md) and is worth knowing about even though this diagram, being about module layout, doesn't include it.
 
 ### The one hard rule
 
@@ -116,7 +118,7 @@ export ANDROID_HOME=/opt/android-sdk
 ./gradlew :app:assembleDebug
 ```
 
-CI must pin the JDK explicitly rather than inheriting the runner default. Required SDK packages: `platform-tools`, `platforms;android-35`, `build-tools;35.0.0`.
+CI must pin the JDK explicitly rather than inheriting the runner default. Required SDK packages track the compile SDK in §1 above (currently `platform-tools`, `platforms;android-37`, `build-tools;37.0.0` — install whatever `compileSdk` in `gradle/libs.versions.toml` currently says, not the literal number here).
 
 ---
 

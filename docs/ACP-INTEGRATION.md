@@ -249,16 +249,16 @@ Fixture: [`prompt-turn-with-permission.jsonl`](../core/src/test/resources/fixtur
 
 ACP does not document a resume-from-cursor mechanism, and a mobile client drops its socket constantly (backgrounding, network changes, Doze). So the bridge owns durability. The CLI already persists sessions as `<id>.json` plus a `<id>.jsonl` event log, which is the natural backing store.
 
-Contract between app and bridge:
+**Shipped contract between app and bridge, as implemented (F-03, 2026-09-02):**
 
-1. The bridge assigns a **monotonic sequence number** to every update it forwards, and appends it to a per-session log.
-2. The app persists the highest sequence number it has rendered.
-3. On reconnect the app sends `lastSeq`; the bridge replays everything after it, then resumes live streaming.
-4. If the log has been truncated past `lastSeq`, the bridge says so explicitly and the app refetches the transcript from scratch rather than silently showing a hole.
+1. The bridge keeps a bounded, ordered, per-session log (`SessionLog`, `bridge/src/main/kotlin/dev/kiro/bridge/SessionLog.kt`) keyed by each update's own `_meta.kiro.messageId` — **no bridge-invented sequence number.**
+2. On reconnect, a client may call `_bridge/resume {sessionId, afterMessageId}`; the bridge replays everything after that `messageId` from its log (`BridgeServer.kt`, `METHOD_RESUME`).
+3. If the requested point has been evicted from the log, or belongs to a session this bridge never saw (bridges are fungible — see the callout above), the bridge answers `{"truncated": true}` and the caller is expected to refetch the transcript via a full `session/load` rather than render a hole.
+4. **`_bridge/resume` is implemented bridge-side but not yet called app-side.** As of 2026-09-02 the Android client always performs a full `session/load` on reconnect (see `loadSession()` in `core/src/main/kotlin/dev/kiro/core/session/CloudSessionGateway.kt`); wiring the app to call `_bridge/resume` for incremental replay is open, tracked under F-15.
 
-Reconnect uses exponential backoff with jitter, and reconnects eagerly on a connectivity-regained callback rather than waiting out the backoff.
+Reconnect uses exponential backoff with jitter, and reconnects eagerly on a connectivity-regained callback rather than waiting out the backoff — both wired into the live reconnect loop as of the F-15 2026-09-02 round.
 
-These control messages are **bridge-specific, not ACP**. Namespace them (e.g. `_bridge/…`) so they can never be mistaken for harness methods, and document them alongside the bridge in F-03.
+These control messages are **bridge-specific, not ACP**. They are namespaced `_bridge/…` (not `_kiro/…`) so they can never be mistaken for harness methods.
 
 ---
 

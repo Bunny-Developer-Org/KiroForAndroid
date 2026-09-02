@@ -136,8 +136,8 @@ The bridge is a WebSocket that can drive an agent with write access to the user'
 
 Design:
 
-1. Bridge generates a **pairing code** on first run and prints it to its own console (plus a QR encoding of `wss://host:port` + code).
-2. App scans the QR or accepts a manual entry, and exchanges the pairing code **once** for a long-lived device token.
+1. Bridge generates a **pairing code** on first run and prints it to its own console (design intent: plus a QR encoding of `wss://host:port` + code — **not yet built**; the shipped `pairingBanner()` prints text only, and the app side has no camera dependency yet, so treat the QR half of this step as F-07's open item, not shipped design).
+2. App scans the QR (once built) or accepts a manual entry — manual entry is shipped (F-07, 2026-09-02) — and exchanges the pairing code **once** for a long-lived device token.
 3. Device token is stored using AndroidKeyStore + DataStore (**not** `androidx.security:security-crypto`, which is deprecated — see [ADR-003](adr/ADR-003-tech-stack.md#1-stack)).
 4. Every WebSocket connection authenticates with the device token; the bridge maintains a revocable device list.
 

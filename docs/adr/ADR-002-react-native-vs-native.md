@@ -1,6 +1,6 @@
 # ADR-002: React Native vs. native Kotlin + Compose for KiroForAndroid
 
-- **Status:** Proposed
+- **Status:** Accepted, and implemented — the app, core, and bridge modules are all native Kotlin/Compose as of 2026-09-02. Nothing since has surfaced a reason to revisit; see §5's trigger table.
 - **Date:** 2026-09
 - **Decision owner:** KiroForAndroid tech lead
 - **Scope:** Client platform/runtime choice for this repo. Does not decide UI design, DI, or module layout.
@@ -11,7 +11,7 @@
 
 KiroForAndroid is an Android client for Kiro [cloud sessions](https://kiro.dev/docs/cloud-sessions/) — agent runs that live in a managed cloud sandbox and survive the client disconnecting. Kiro ships a native iOS app (closed source, Apple-built, TestFlight) and no Android app. Every Kiro surface — IDE, CLI, Web, Mobile — talks to the same agent harness over the [Agent Client Protocol](https://kiro.dev/docs/cli/acp/) (JSON-RPC 2.0), extended with Kiro-specific `_kiro/` methods; Web and Mobile use a WebSocket transport.
 
-The repo currently contains **planning documents only — no implementation**. The proposed stack ([ADR-003](ADR-003-tech-stack.md)) is Kotlin 2.0.x + Compose, Ktor, kotlinx.serialization. Because nothing is built yet, switching runtimes costs almost nothing today. That is precisely why the question is worth answering now rather than in three months.
+At the time this ADR was written, the repo contained **planning documents only — no implementation**, which is why §6's migration-cost table below starts from a "switching is free" baseline. That baseline is now historical: the stack it proposed ([ADR-003](ADR-003-tech-stack.md), Kotlin + Compose, Ktor, kotlinx.serialization) has since been built — `app/`, `core/`, and `bridge/` are real, tested, CI-green Kotlin code, with session list, multi-bridge pairing, transcript rendering, and reconnect logic shipped (see [FEATURES.md](../FEATURES.md)). The decision recorded here has not been revisited; §6 is kept as a historical estimate of what switching would have cost at each milestone, with a note added on where the project actually sits today.
 
 The requirements that actually discriminate between runtimes:
 
@@ -142,7 +142,9 @@ Flutter does not win under any of these branches: its background story is identi
 
 ## 6. Migration cost estimate
 
-No implementation exists yet — the repo is plan-only. **Right now, switching is free:** it means editing ADR-003 and a handful of work-item descriptions in [FEATURES.md](../FEATURES.md), not touching code. The cost is entirely a function of when.
+**Historical estimate, written when the repo was plan-only.** The table below models the cost of switching *at each milestone*; it was accurate at the "Now" row when this ADR was written, and is kept as-is because the milestones and reasoning still hold. It has not been kept in sync with which row the project is actually on — do not read the "Now" row as current.
+
+**Where the project actually sits as of 2026-09-02:** session list, multi-bridge pairing, transcript streaming/rendering, prompt composer, permission and free-text-input UI, and reconnect hardening have all shipped in some form (several still `PARTIAL` per [FEATURES.md](../FEATURES.md)); the foreground service is declared and wired but push notifications (F-16) have not started. That puts the real switch cost somewhere between the "After streaming transcript ships" and "After FGS + reconnect/replay + push ship" rows — call it **4–8 weeks**, not the "~0" implied by reading only the first data row below.
 
 | Switch point | Effort | Notes |
 |---|---|---|
