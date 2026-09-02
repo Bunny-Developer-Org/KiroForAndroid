@@ -31,11 +31,13 @@ So this app **cannot** talk straight to Kiro's cloud, and we have chosen **not**
 
 F-01 confirmed this works, and simplified it: the bridge does not need to shell out to `--cloud` and re-attach by `--resume-id`. `kiro-cli acp --agent-engine v3 --auth-method cli` lists, creates, loads and drives cloud sessions entirely in-protocol. It also found that a naive `kiro-cli acp` with default flags is local-only — which would make the whole approach look impossible if you didn't know.
 
+That machine does **not** need to be the one you code on. For a cloud session, `kiro-cli` never touches your working directory — repositories are named as `owner/repo`, resolved against your Kiro account's connected GitHub/GitLab, and cloned inside Kiro's sandbox, which also pushes the branch and opens the PR. So the bridge needs no checkout, no git credentials and no meaningful working directory. It is a relay, and `kiro-cli` runs on Linux `aarch64` — a Raspberry Pi is enough. See [ADR-004](docs/adr/ADR-004-work-repo-selection.md) and [ADR-005](docs/adr/ADR-005-bridge-hosting-and-availability.md).
+
 ```
 Android app  ──WSS/ACP──►  bridge (user-hosted)  ──stdio/ACP──►  kiro-cli  ──►  Kiro cloud sandbox
 ```
 
-The honest cost: **you need a machine running the bridge.** This is not a phone-only app, and it is not at parity with Kiro's iOS app. The full reasoning, the rejected alternatives, and the conditions that would change this are in [ADR-001](docs/adr/ADR-001-cloud-session-access.md).
+The honest cost: **you need a machine running the bridge**, and ideally one that stays awake — a cloud session keeps working while nothing is attached, but nothing tells you it finished if your bridge is a sleeping laptop. This is not a phone-only app, and it is not at parity with Kiro's iOS app. The full reasoning, the rejected alternatives, and the conditions that would change this are in [ADR-001](docs/adr/ADR-001-cloud-session-access.md); where the bridge should run and how the app behaves when it is unreachable are in [ADR-005](docs/adr/ADR-005-bridge-hosting-and-availability.md).
 
 ## Signing in
 
@@ -57,6 +59,8 @@ One correction from F-01: the CLI asks **which provider** before it prints anyth
 | [ADR-001](docs/adr/ADR-001-cloud-session-access.md) | **How the app reaches cloud sessions.** The constraint above, options considered, and the six assumptions that must be verified before building |
 | [ADR-002](docs/adr/ADR-002-react-native-vs-native.md) | React Native vs. native Kotlin/Compose. Recommends native (high confidence) with explicit flip conditions |
 | [ADR-003](docs/adr/ADR-003-tech-stack.md) | Stack, module layout, and the conventions that keep parallel work coherent |
+| [ADR-004](docs/adr/ADR-004-work-repo-selection.md) | **How a work repository gets chosen.** What `kiro-cli` actually does (it does *not* use your working directory), why binding is easy and enumeration isn't, and what the picker is built from |
+| [ADR-005](docs/adr/ADR-005-bridge-hosting-and-availability.md) | **Where the bridge runs, and what the app does when it doesn't.** Host requirements, hosting options, and the degradation contract |
 
 ## Planned scope
 
@@ -74,7 +78,7 @@ Pick an item from [FEATURES.md](docs/FEATURES.md) and read *How to pick up an it
 2. **[PROTOCOL-FINDINGS.md](docs/PROTOCOL-FINDINGS.md) supersedes the published protocol docs** wherever they disagree. It was written from captured frames; several things Kiro documents are wrong or incomplete.
 3. **`core/` stays Android-free**, and all UI goes through the `CloudSessionGateway` seam. CI is meant to enforce the former.
 
-The genuinely open questions right now: whether Kiro would sanction a third-party client at all (F-00), what this project may legitimately be called given it uses Kiro's name (F-23), and how much of the bridge (F-03) is left once you subtract what KAS already does.
+The genuinely open questions right now: whether a cloud session can be created with its repositories bound **non-interactively** (ADR-004 A8), whether Kiro would sanction a third-party client at all (F-00), what this project may legitimately be called given it uses Kiro's name (F-23), and how much of the bridge (F-03) is left once you subtract what KAS already does.
 
 ---
 

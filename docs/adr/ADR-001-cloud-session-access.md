@@ -57,7 +57,7 @@ Reverse-engineer the Web/iOS client's endpoint, auth, and framing; speak it from
 
 ### Option B — Self-hosted ACP bridge fronting `kiro-cli`
 
-The user runs a small bridge process on a machine they control (home server, workstation, cheap VPS) where `kiro-cli` is installed and signed in. The bridge:
+The user runs a small bridge process on a machine they control (home server, workstation, cheap VPS) where `kiro-cli` is installed and signed in. It does **not** need a checkout of the user's code or any git credentials — see [ADR-004 §2](ADR-004-work-repo-selection.md#2-what-we-found-how-kiro-cli-actually-selects-the-work-repo) — and where it should run is decided in [ADR-005](ADR-005-bridge-hosting-and-availability.md). The bridge:
 
 1. spawns `kiro-cli acp --agent-engine v3 --auth-method cli` (documented: ACP agent, JSON-RPC 2.0 over stdio) and creates cloud sessions in-protocol — F-01 confirmed the `--cloud`/`--resume-id` shell-out is not needed;
 2. exposes that JSON-RPC stream over an authenticated WebSocket;
@@ -149,13 +149,15 @@ These were load-bearing and unverified when this ADR was written. They have sinc
 | A1 | `kiro-cli acp` can attach to a **cloud** session, not only local ones | **Verified.** `session/load` on a `cloud-sandbox` session succeeded and replayed 991 updates. The `--resume-id` fallback is not needed. |
 | A2 | A cloud session is reachable through `session/load` by ID | **Verified.** Store and placement are selected per-request via `params._meta.kiro.{sessionSource, listScope, executionTarget}`. Cloud sessions are also *listable* over ACP, with repositories and status. |
 | A3 | The extension prefix is `_kiro.dev/` rather than `_kiro/` | **Refuted, harmlessly.** It is `_kiro/`; the ACP docs page is wrong. Better: `initialize` enumerates the agent's extension methods, so the client should derive the prefix rather than hard-code either spelling. |
-| A4 | Repository selection is reachable programmatically | **Verified, and better than assumed.** `_kiro/sourceProviders/list` and `/listResources` return a full repo catalog with visibility and default branch — no `--repo` flag or slash command needed. |
-| A5 | Permission requests arrive as answerable server-initiated ACP requests | **Verified on a local session.** `session/request_permission` carries the options and a `_meta.kiro.consent` description; a plain JSON-RPC response resolves it. **Not yet observed on a cloud session** — F-03 must confirm on its first cloud turn. |
-| A6 | `login --use-device-flow` can be driven non-interactively | **Partially refuted.** The verification URI and user code *are* printed parseably, but the CLI first shows an interactive provider-picker TUI with no flag to preselect. The bridge must drive it over a **pty**, and provider choice moves into the app. `login` also refuses while signed in, so re-auth needs an explicit `logout`. |
+| A4 | Repository selection is reachable programmatically | **Verified for enumeration**, and better than assumed — `_kiro/sourceProviders/list` and `/listResources` return a full repo catalog with visibility and default branch, no `--repo` flag or slash command needed. But this conflated two questions with different answers: enumerating repos is solved; whether a session can be *created* bound to one **non-interactively** is not. **Superseded by [ADR-004 §7](ADR-004-work-repo-selection.md#7-assumptions-to-verify--extends-adr-001-5-same-numbering) (A7–A12)** for the part that remains open (A8). |
+| A5 | Permission requests arrive as answerable server-initiated ACP requests | **Verified on a local session.** `session/request_permission` carries the options and a `_meta.kiro.consent` description; a plain JSON-RPC response resolves it. **Not yet observed on a cloud session** — F-03 must confirm on its first cloud turn, and [ADR-005 §7](ADR-005-bridge-hosting-and-availability.md#7-assumptions-to-verify--extends-adr-001-5-and-adr-004-7) A14 extends this to durability across reattach on a cloud session specifically. |
+| A6 | `login --use-device-flow` can be driven non-interactively | **Partially refuted.** The verification URI and user code *are* printed parseably, but the CLI first shows an interactive provider-picker TUI with no flag to preselect. The bridge must drive it over a **pty**, and provider choice moves into the app. `login` also refuses while signed in, so re-auth needs an explicit `logout`. Consistent with independent evidence: `kiro-cli` 2.18.1 was reported to fail non-interactive use with `Failed to open browser for authentication. Please try again with: kiro-cli login --use-device-flow` on a headless host ([kirodotdev/Kiro#10885](https://github.com/kirodotdev/Kiro/issues/10885)) — this spike's pty-driven capture is what makes the flag usable from a bridge despite that. |
 
 **One correction that is not an assumption, and matters more than any of them:** the default `kiro-cli acp` engine cannot reach cloud sessions at all. Every client must pass `--agent-engine v3 --auth-method cli`. See PROTOCOL-FINDINGS §2.
 
 **A second:** much of what §3's topology assumed the bridge would build — WebSocket ACP transport, multi-client multiplexing, permission correlation across reconnects, pending-permission re-send on attach — already exists inside KAS. F-03's scope shrinks accordingly. See PROTOCOL-FINDINGS §4.
+
+Two later ADRs extend this list rather than starting their own: [ADR-004 §7](ADR-004-work-repo-selection.md#7-assumptions-to-verify--extends-adr-001-5-same-numbering) adds **A7–A12** (repository binding and enumeration) and [ADR-005 §7](ADR-005-bridge-hosting-and-availability.md#7-assumptions-to-verify--extends-adr-001-5-and-adr-004-7) adds **A13–A17** (bridge fungibility, durable approvals, headless CLI residency). The numbering is global on purpose — there is one list of things we do not yet know.
 
 ---
 
@@ -165,6 +167,7 @@ These were load-bearing and unverified when this ADR was written. They have sinc
 - The bridge is a first-class deliverable of this project, not a dev convenience.
 - Onboarding must explain the bridge requirement honestly and early.
 - If Option C lands, the migration is one new gateway implementation plus an onboarding change — by design.
+- Two follow-on ADRs take up what this one deferred: [ADR-004](ADR-004-work-repo-selection.md) on how a work repository is chosen, and [ADR-005](ADR-005-bridge-hosting-and-availability.md) on where the bridge runs and what the app does when it is unreachable.
 
 ---
 
