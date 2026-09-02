@@ -166,6 +166,57 @@ class TranscriptViewModelTest {
         assertNull(viewModel.userInput.value)
     }
 
+    @Test
+    fun `send with text only builds a single Text block`() = viewModelTest { viewModel, gateway ->
+        runCurrent()
+
+        viewModel.send("hello there")
+        runCurrent()
+
+        assertEquals(
+            listOf("s1" to listOf<PromptBlock>(PromptBlock.Text("hello there"))),
+            gateway.promptCalls,
+        )
+    }
+
+    @Test
+    fun `send with text and image builds both blocks`() = viewModelTest { viewModel, gateway ->
+        runCurrent()
+
+        val image = PromptBlock.Image("image/png", "base64data")
+        viewModel.send("look at this", image)
+        runCurrent()
+
+        assertEquals(
+            listOf("s1" to listOf<PromptBlock>(PromptBlock.Text("look at this"), image)),
+            gateway.promptCalls,
+        )
+    }
+
+    @Test
+    fun `send with only an image omits the Text block`() = viewModelTest { viewModel, gateway ->
+        runCurrent()
+
+        val image = PromptBlock.Image("image/jpeg", "morebase64")
+        viewModel.send("", image)
+        runCurrent()
+
+        assertEquals(
+            listOf("s1" to listOf<PromptBlock>(image)),
+            gateway.promptCalls,
+        )
+    }
+
+    @Test
+    fun `send with blank text and no image is a no-op`() = viewModelTest { viewModel, gateway ->
+        runCurrent()
+
+        viewModel.send("   ")
+        runCurrent()
+
+        assertEquals(emptyList<Pair<String, List<PromptBlock>>>(), gateway.promptCalls)
+    }
+
     /**
      * A minimal [CloudSessionGateway] double, purpose-built to record
      * `respondToUserInput` calls precisely rather than infer them from
@@ -173,6 +224,9 @@ class TranscriptViewModelTest {
      */
     private class RecordingGateway : CloudSessionGateway {
         val userInputResponses = mutableListOf<Triple<String, String, String?>>()
+
+        /** Every call to [prompt], recorded as (sessionId, blocks) for assertions. */
+        val promptCalls = mutableListOf<Pair<String, List<PromptBlock>>>()
 
         override val connection: Flow<ConnectionState> = MutableSharedFlow()
         override val updates: MutableSharedFlow<SessionUpdate> = MutableSharedFlow(extraBufferCapacity = 16)
@@ -188,7 +242,10 @@ class TranscriptViewModelTest {
         override suspend fun createSession(request: CreateSessionRequest): CloudSession =
             error("not used by this test")
         override suspend fun loadSession(sessionId: String, source: SessionSource): Unit = Unit
-        override suspend fun prompt(sessionId: String, blocks: List<PromptBlock>): String? = null
+        override suspend fun prompt(sessionId: String, blocks: List<PromptBlock>): String? {
+            promptCalls += sessionId to blocks
+            return null
+        }
         override suspend fun cancel(sessionId: String): Unit = Unit
         override suspend fun setMode(sessionId: String, modeId: String): Unit = Unit
         override suspend fun setModel(sessionId: String, modelId: String): Unit = Unit
