@@ -4,6 +4,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -149,18 +150,20 @@ private fun ApprovalAction(
             Text(option.name, style = MaterialTheme.typography.labelLarge)
         }
     } else {
+        // Text color alone isn't enough affordance for the one mis-tap-proof
+        // action on this card — the border has to read as destructive too, not
+        // fall back to the neutral M3 outline.
+        val emphasis = if (option.kind.isReject) colors.danger else colors.text
         OutlinedButton(
             onClick = { onRespond(option.optionId) },
             modifier = Modifier
                 .heightIn(min = KiroLayout.TouchTarget)
                 .semantics { contentDescription = description },
             shape = MaterialTheme.shapes.small,
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = emphasis),
+            border = BorderStroke(1.dp, if (option.kind.isReject) colors.danger else colors.border),
         ) {
-            Text(
-                option.name,
-                style = MaterialTheme.typography.labelLarge,
-                color = if (option.kind.isReject) colors.danger else colors.text,
-            )
+            Text(option.name, style = MaterialTheme.typography.labelLarge, color = emphasis)
         }
     }
 }
