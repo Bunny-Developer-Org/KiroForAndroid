@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -43,12 +45,20 @@ fun SessionListScreen(
     sessions: List<CloudSession>,
     connection: ConnectionState,
     onOpen: (CloudSession) -> Unit,
+    onNewSession: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = KiroTheme.colors
 
     Column(modifier.fillMaxSize().background(colors.bg)) {
         ConnectionBanner(connection)
+
+        NewSessionAction(
+            enabled = connection is ConnectionState.Connected &&
+                connection.agentSupportsCloudSessions,
+            connection = connection,
+            onClick = onNewSession,
+        )
 
         if (sessions.isEmpty()) {
             NamedState(
@@ -64,6 +74,54 @@ fun SessionListScreen(
                     HorizontalDivider(color = colors.border, thickness = 1.dp)
                 }
             }
+        }
+    }
+}
+
+/**
+ * Creating is disabled **with a reason**, never just greyed out.
+ *
+ * ADR-005 §5.3 is explicit about this: a disabled control with no explanation is
+ * indistinguishable from a broken one, and the usual reason here is simply that
+ * the machine running the bridge is asleep.
+ */
+@Composable
+private fun NewSessionAction(
+    enabled: Boolean,
+    connection: ConnectionState,
+    onClick: () -> Unit,
+) {
+    val colors = KiroTheme.colors
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = KiroLayout.ScreenGutter, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Button(
+            onClick = onClick,
+            enabled = enabled,
+            shape = MaterialTheme.shapes.small,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = colors.accent,
+                contentColor = colors.accentFg,
+            ),
+            modifier = Modifier.fillMaxWidth().heightIn(min = KiroLayout.TouchTarget),
+        ) {
+            Text("New cloud session", style = MaterialTheme.typography.labelLarge)
+        }
+        if (!enabled) {
+            Text(
+                when (connection) {
+                    is ConnectionState.Unreachable ->
+                        "You cannot start a session while the bridge is unreachable."
+                    is ConnectionState.Connected ->
+                        "This bridge's agent cannot place sessions in Kiro's cloud sandbox."
+                    else -> "Connect to a bridge to start a session."
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.muted,
+            )
         }
     }
 }

@@ -19,10 +19,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import dev.kiro.android.platform.PairingClient
 import dev.kiro.android.ui.onboarding.PairingScreen
-import dev.kiro.android.ui.sessions.SessionListScreen
+import dev.kiro.android.ui.AppNavigation
 import dev.kiro.android.ui.theme.KiroTheme
 import dev.kiro.core.auth.PairedBridge
-import dev.kiro.core.model.CloudSession
 import dev.kiro.core.session.ConnectionState
 import kotlinx.coroutines.launch
 
@@ -55,7 +54,6 @@ class MainActivity : ComponentActivity() {
 private fun AppRoot() {
     val scope = rememberCoroutineScope()
     var paired by remember { mutableStateOf<PairedBridge?>(null) }
-    var sessions by remember { mutableStateOf<List<CloudSession>>(emptyList()) }
     var connection by remember { mutableStateOf<ConnectionState>(ConnectionState.Disconnected) }
     var pairingError by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -66,12 +64,11 @@ private fun AppRoot() {
             val token = ServiceLocator.tokenStore.get(bridge.id)
             if (token != null) {
                 runCatching { ServiceLocator.connect(bridge.url, token) }
-                    .onSuccess { gateway ->
+                    .onSuccess { _ ->
                         connection = ConnectionState.Connected(
                             agentSupportsCloudSessions = true,
                             supportsImages = true,
                         )
-                        sessions = runCatching { gateway.listSessions() }.getOrDefault(emptyList())
                     }
                     .onFailure {
                         // A named state, not a spinner: the bridge is very often
@@ -113,10 +110,8 @@ private fun AppRoot() {
             busy = busy,
         )
     } else {
-        SessionListScreen(
-            sessions = sessions,
-            connection = connection,
-            onOpen = { /* F-12 navigation lands here */ },
-        )
+        // Everything past pairing is one graph, so the transcript can be handed the
+        // session object it already has rather than an id to look up again.
+        AppNavigation(gateway = ServiceLocator.gateway(), connection = connection)
     }
 }

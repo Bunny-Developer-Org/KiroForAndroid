@@ -145,10 +145,14 @@ Turn boundaries and session state do **not** have their own update kinds. **Ther
 | `context_usage` | Percentage plus a token breakdown by category |
 | `focus_update` | The agent retitling the session mid-turn |
 | `user_message_id_assigned` | Correlates a sent prompt with its server-side id |
-| `pendingInteraction` | **An approval is outstanding** — render the waiting state |
-| `interactionResolved` | It was answered, and with which option — clear the state even when *another* client answered |
-| `promptTurnSummaries` | Per-turn credit spend and tools used (F-19b) |
-| `displayError` | A user-facing error delivered in-band, e.g. an MCP server needing authorization |
+| `pending_interaction` | **An approval is outstanding** — render the waiting state |
+| `interaction_resolved` | It was answered, and with which option — clear the state even when *another* client answered |
+| `turn_completion` | Per-turn credit spend and tools used (F-19b), in a `promptTurnSummaries` array |
+| `display_error` | A user-facing error delivered in-band, e.g. an MCP server needing authorization |
+
+> **Corrected 2026-09-02 by F-04.** The last four were previously listed here — and in [PROTOCOL-FINDINGS §5](PROTOCOL-FINDINGS.md#5-corrections-to-the-documented-protocol) — in camelCase. The committed fixture disagrees: 2.19.2 sends `snake_case` for **every** `_meta.kiro.kind`, and `promptTurnSummaries` is not a kind at all but a *field* inside `turn_completion`.
+>
+> This mattered more than a spelling usually does. A client written from the prose would have matched none of those four, so an approval would never have rendered — the app's most important interaction failing silently while the transcript streamed normally around it. The parser accepts both spellings, so this correction is not urgent; finding it in a fixture rather than a bug report is what the fixtures are for.
 
 Rendering strategy is fixed by [ADR-003 §3](adr/ADR-003-tech-stack.md#3-two-conventions-that-are-load-bearing): the in-flight message renders **outside** the lazy list and is appended to it only at turn end. Highlighting recomputed per token on a growing string is the specific failure mode to avoid.
 
@@ -222,7 +226,7 @@ Design requirements:
 
 - **Render `options[]` as sent**, keyed by `kind`. The four above are what 2.19.2 offers; the list is agent-supplied and must not be hard-coded.
 - `_meta.kiro.consent` gives the capability, the concrete resource, and whether the ask was implicit — enough for a notification to be readable without opening the session.
-- On attach, **check for a pending approval immediately** and surface it before the transcript finishes replaying. `pendingInteraction` / `interactionResolved` (§4) also carry this in-stream, including when another client answers first.
+- On attach, **check for a pending approval immediately** and surface it before the transcript finishes replaying. `pending_interaction` / `interaction_resolved` (§4) also carry this in-stream, including when another client answers first.
 - Deliver via notification with inline allow/deny actions (F-16).
 - **Answering does not require the connection that asked.** KAS correlates by `toolCallId` via `_kiro/permission/respond` `{toolCallId, optionId, sessionId?}` — which is precisely the mobile case: a notification arrives, the socket has since dropped, the user taps Allow on a fresh one.
 - **There is a second channel: `_kiro/userInput`.** The agent can ask a free-text question mid-turn, answered with `_kiro/userInput/respond` `{toolCallId, action: "answered"|"dismissed", answer?}`. Undocumented, and it needs its own UI.

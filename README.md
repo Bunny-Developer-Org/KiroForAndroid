@@ -1,88 +1,74 @@
-# Kiro for Android
+# KiroForAndroid
 
-An **unofficial** Android client for [Kiro](https://kiro.dev) cloud sessions — start, steer, and approve agent work from your phone.
+An unofficial Android client for [Kiro](https://kiro.dev) **cloud sessions** — agent runs that live in a managed cloud sandbox and keep working after the client disconnects. Kiro ships an iOS app and no Android one.
 
-Kiro ships a native **iOS** app (TestFlight early access) and, as of this writing, no Android app. This project aims to close that gap.
-
-> ### Status: planning, with the protocol verified. No app code yet.
->
-> This repo contains the **plan** — an architecture decision record set and a feature backlog written so that implementation can be picked up by multiple contributors (or agents) working in parallel — plus the output of the one spike that had to come first.
->
-> **[F-01 has reported.](docs/PROTOCOL-FINDINGS.md)** The six load-bearing assumptions were checked against a real `kiro-cli` on 2026-09-02: four verified, one refuted harmlessly, one partially refuted. **The architecture holds, and `kiro-cli acp` does reach cloud sessions.** Real JSON-RPC frames are committed as [test fixtures](core/src/test/resources/fixtures/).
->
-> Start with [FEATURES.md](docs/FEATURES.md), and read [PROTOCOL-FINDINGS.md](docs/PROTOCOL-FINDINGS.md) before picking up anything in Phase 1+.
+**Status: early. It builds, it talks to a real `kiro-cli`, and it is not finished.** See [docs/FEATURES.md](docs/FEATURES.md) for what is done, partial, and untouched.
 
 ---
 
-## Read this first: the constraint that shapes everything
+## The thing to understand first
 
-Kiro's documentation describes cloud sessions thoroughly, and confirms that all four first-party surfaces (IDE, CLI, Web, Mobile) reach the agent harness over the **Agent Client Protocol** — JSON-RPC 2.0, with Web and Mobile using a WebSocket transport.
+**This app cannot reach Kiro on its own, and no version of it ever will without Kiro's cooperation.**
 
-What it does **not** publish is anything a third party could build against directly:
+Kiro publishes no API, no OAuth client registration, and no endpoint for third-party clients. Every documented path to a cloud session goes through a first-party client. [ADR-001](docs/adr/ADR-001-cloud-session-access.md) explains why reverse-engineering the private one was rejected on principle rather than on difficulty.
 
-- no documented endpoint for the cloud-session WebSocket,
-- no documented API to create, list, or delete a cloud session,
-- no OAuth client registration for third-party apps,
-- and the CLI is not open source, so the protocol can't be learned from the client.
+So the app talks to a **bridge**: a small program you run yourself, on a machine where `kiro-cli` is installed and signed in. The bridge supervises `kiro-cli acp` and relays it to your phone over an authenticated WebSocket.
 
-So this app **cannot** talk straight to Kiro's cloud, and we have chosen **not** to reverse-engineer a private API — that would produce something that demos well and breaks without warning, while holding credentials that let an agent write to the user's repositories.
+What the bridge host actually needs turns out to be much less than it sounds:
 
-**Instead:** the app is an ACP client that talks to a small **bridge** the user runs on a machine where `kiro-cli` is already installed and signed in. The bridge speaks only documented interfaces. Kiro credentials never leave the user's own machine.
+| | |
+|---|---|
+| A copy of your code | **No.** Kiro clones repositories inside its own sandbox. |
+| Git credentials | **No.** The Kiro Agent app pushes and opens PRs, server-side. |
+| Developer-grade hardware | **No.** `kiro-cli` runs on Linux `aarch64`; a Raspberry Pi qualifies. |
+| The `kiro-cli` binary, a signed-in Pro account, outbound HTTPS | **Yes.** That is the whole list. |
+| Enough uptime to be awake when you pick up your phone | **Yes**, and this is the real cost. |
 
-F-01 confirmed this works, and simplified it: the bridge does not need to shell out to `--cloud` and re-attach by `--resume-id`. `kiro-cli acp --agent-engine v3 --auth-method cli` lists, creates, loads and drives cloud sessions entirely in-protocol. It also found that a naive `kiro-cli acp` with default flags is local-only — which would make the whole approach look impossible if you didn't know.
+That last row is the honest catch: **a sleeping bridge is a silent app.** Notifications are sent by the bridge, so if it lives on a laptop that closes at night, approval prompts do not reach you until it wakes. [ADR-005](docs/adr/ADR-005-bridge-hosting-and-availability.md) treats that as a documented limitation with a designed degradation path, not a bug to chase.
 
-That machine does **not** need to be the one you code on. For a cloud session, `kiro-cli` never touches your working directory — repositories are named as `owner/repo`, resolved against your Kiro account's connected GitHub/GitLab, and cloned inside Kiro's sandbox, which also pushes the branch and opens the PR. So the bridge needs no checkout, no git credentials and no meaningful working directory. It is a relay, and `kiro-cli` runs on Linux `aarch64` — a Raspberry Pi is enough. See [ADR-004](docs/adr/ADR-004-work-repo-selection.md) and [ADR-005](docs/adr/ADR-005-bridge-hosting-and-availability.md).
+## Layout
 
 ```
-Android app  ──WSS/ACP──►  bridge (user-hosted)  ──stdio/ACP──►  kiro-cli  ──►  Kiro cloud sandbox
+core/     Pure Kotlin/JVM. ACP client, JSON-RPC framing, session state, transcript
+          reducer. No android.* imports — CI fails the build if one appears.
+app/      The Android client. Compose, Material 3.
+bridge/   The host-side relay. Kotlin/JVM, ships as a container image.
+tools/    The ACP probe that produced the protocol findings and golden fixtures.
 ```
 
-The honest cost: **you need a machine running the bridge**, and ideally one that stays awake — a cloud session keeps working while nothing is attached, but nothing tells you it finished if your bridge is a sleeping laptop. This is not a phone-only app, and it is not at parity with Kiro's iOS app. The full reasoning, the rejected alternatives, and the conditions that would change this are in [ADR-001](docs/adr/ADR-001-cloud-session-access.md); where the bridge should run and how the app behaves when it is unreachable are in [ADR-005](docs/adr/ADR-005-bridge-hosting-and-availability.md).
+## Building
 
-## Signing in
+```bash
+export JAVA_HOME=/path/to/jdk-21   # AGP rejects JDK 22+
+export ANDROID_HOME=/path/to/android-sdk
+./gradlew build
+```
 
-The requirement is to sign in with your **Kiro account via OAuth in a web browser**, and that works without the app ever holding a Kiro credential.
+## Running the bridge
 
-The bridge runs `kiro-cli login --use-device-flow`, which performs the OAuth 2.0 Device Authorization Grant. It returns a verification URL and a user code; the app opens the URL in a Custom Tab; you sign in to Kiro in a real browser; the CLI completes the exchange on the bridge host.
+```bash
+./gradlew :bridge:installDist && ./bridge/build/install/bridge/bin/bridge
+```
 
-One correction from F-01: the CLI asks **which provider** before it prints anything, on an interactive prompt with no flag to skip it. So the app shows the four choices itself — Builder ID, Google, GitHub, or your organization — and the bridge drives the CLI over a pty. Slightly more work, and arguably a better first screen. See [AUTHENTICATION.md](docs/AUTHENTICATION.md).
+It prints a pairing code. Enter that and the address in the app.
+
+By default it binds `127.0.0.1`, and it **refuses to start** on any other address without TLS — a non-loopback bind puts the pairing handshake and every device token on your network in the clear.
+
+To provision it without an interactive login, set `KIRO_API_KEY`. One caveat worth knowing: that variable overrides whatever account the CLI is signed in as, and there is no flag to suppress it.
 
 ## Documents
 
-| Document | What it covers |
+Read in this order:
+
+| | |
 |---|---|
-| **[docs/FEATURES.md](docs/FEATURES.md)** | **The backlog.** 25 work items in 5 phases, with acceptance criteria, dependencies, and a parallelisation graph. Start here to contribute. |
-| **[docs/PROTOCOL-FINDINGS.md](docs/PROTOCOL-FINDINGS.md)** | **What the protocol actually does**, from frames captured off a real `kiro-cli`. Corrects the published docs in several places. Read before writing protocol code. |
-| **[docs/PRIOR-ART.md](docs/PRIOR-ART.md)** | **What everyone else built, and why none of it reaches cloud sessions.** Three published projects surveyed; two ideas worth stealing, and one trap confirmed |
-| [docs/ACP-INTEGRATION.md](docs/ACP-INTEGRATION.md) | The protocol contract to implement — handshake, session lifecycle, streaming updates, extensions, reconnect/replay |
-| [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) | Sign-in design: device flow relayed through the app, bridge pairing, token storage, auth state machine |
-| [docs/VISUAL-LANGUAGE.md](docs/VISUAL-LANGUAGE.md) | **The look.** Colour tokens, type scale, shape, motion and per-screen hints, steered onto Kiro Crew's aesthetic rather than Kiro IDE's or Web's |
-| [ADR-001](docs/adr/ADR-001-cloud-session-access.md) | **How the app reaches cloud sessions.** The constraint above, options considered, and the six assumptions that must be verified before building |
-| [ADR-002](docs/adr/ADR-002-react-native-vs-native.md) | React Native vs. native Kotlin/Compose. Recommends native (high confidence) with explicit flip conditions |
-| [ADR-003](docs/adr/ADR-003-tech-stack.md) | Stack, module layout, and the conventions that keep parallel work coherent |
-| [ADR-004](docs/adr/ADR-004-work-repo-selection.md) | **How a work repository gets chosen.** What `kiro-cli` actually does (it does *not* use your working directory), why binding is easy and enumeration isn't, and what the picker is built from |
-| [ADR-005](docs/adr/ADR-005-bridge-hosting-and-availability.md) | **Where the bridge runs, and what the app does when it doesn't.** Host requirements, hosting options, and the degradation contract |
+| [ADR-001](docs/adr/ADR-001-cloud-session-access.md) | Why there is a bridge at all. Constrains everything else. |
+| [PROTOCOL-FINDINGS](docs/PROTOCOL-FINDINGS.md) | What a real `kiro-cli` actually does, versus what the docs say. Several published details are wrong. |
+| [ADR-002](docs/adr/ADR-002-react-native-vs-native.md) · [ADR-003](docs/adr/ADR-003-tech-stack.md) | Native Kotlin over React Native, and the stack that follows. |
+| [ADR-004](docs/adr/ADR-004-work-repo-selection.md) · [ADR-005](docs/adr/ADR-005-bridge-hosting-and-availability.md) | How repositories are bound; where the bridge runs and what happens when it does not. |
+| [ACP-INTEGRATION](docs/ACP-INTEGRATION.md) · [AUTHENTICATION](docs/AUTHENTICATION.md) | The protocol and sign-in contracts. |
+| [VISUAL-LANGUAGE](docs/VISUAL-LANGUAGE.md) | So ten screens look like one app. |
 
-## Planned scope
+## Unaffiliated
 
-**Phase 3 target — the minimum that justifies the app:** sign in with your Kiro account, create a cloud session against one or more GitHub/GitLab repos with a model and autonomy level, watch the agent work in a live transcript, answer its approval requests from a notification, and get the pull request link when it's done.
-
-Every one of those now has a verified mechanism behind it — session listing and creation, the repository catalog, streaming, and approvals were all exercised against a real CLI.
-
-Deliberately out of scope for now: scheduled automations (Web-only in Kiro), branch selection at attach time and session renaming (not supported in the cloud-session preview), and anything requiring local filesystem access (the workspace lives in the cloud sandbox).
-
-## Contributing
-
-Pick an item from [FEATURES.md](docs/FEATURES.md) and read *How to pick up an item* at the bottom of that file. Three things matter most:
-
-1. **[ADR-001](docs/adr/ADR-001-cloud-session-access.md) is binding.** PRs adding reverse-engineered Kiro endpoints will be declined on principle, not on style.
-2. **[PROTOCOL-FINDINGS.md](docs/PROTOCOL-FINDINGS.md) supersedes the published protocol docs** wherever they disagree. It was written from captured frames; several things Kiro documents are wrong or incomplete.
-3. **`core/` stays Android-free**, and all UI goes through the `CloudSessionGateway` seam. CI is meant to enforce the former.
-
-The genuinely open questions right now: whether a cloud session can be created with its repositories bound **non-interactively** (ADR-004 A8), whether `KIRO_API_KEY` authenticates an `acp` session and reaches cloud sessions (ADR-005 A18 — a yes would remove the pty-driven login from the bridge), whether Kiro would sanction a third-party client at all (F-00), what this project may legitimately be called given it uses Kiro's name (F-23), and how much of the bridge (F-03) is left once you subtract what KAS already does.
-
-Three other projects have tried to put Kiro on a phone. None of them reaches cloud sessions, none implements approvals, and none survives a reconnect — [PRIOR-ART.md](docs/PRIOR-ART.md) says why, and what is worth taking from them anyway.
-
----
-
-**Not affiliated with, endorsed by, or supported by Kiro or Amazon.** "Kiro" is used here only to describe what this client connects to; naming and branding are an open question tracked in F-23. External facts are cited inline in each document and paraphrased from their sources.
+Not affiliated with, endorsed by, or supported by Kiro or Amazon. Naming and distribution are unresolved — see F-23.

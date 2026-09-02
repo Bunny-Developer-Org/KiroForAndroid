@@ -254,9 +254,11 @@ The [ACP page](https://kiro.dev/docs/cli/acp/) names four streaming update kinds
 - `context_usage` — percentage plus a token breakdown by category
 - `focus_update` — the agent retitling the session mid-turn
 - `user_message_id_assigned`
-- `pendingInteraction` / `interactionResolved` — **an approval is outstanding / was answered**, including which option won. This lets the app render a "waiting on you" state, and correctly clear it when *another* client answers first.
-- `promptTurnSummaries` — per-turn credit spend and tools used. A cost display is nearly free; worth an item in FEATURES.md.
-- `displayError` — user-facing errors (e.g. an MCP server needing authorization) delivered in-band.
+- `pending_interaction` / `interaction_resolved` — **an approval is outstanding / was answered**, including which option won. This lets the app render a "waiting on you" state, and correctly clear it when *another* client answers first.
+- `turn_completion` — carries `promptTurnSummaries` (per-turn credit spend and tools used) plus `elapsedTime`. A cost display is nearly free; worth an item in FEATURES.md.
+- `display_error` — user-facing errors (e.g. an MCP server needing authorization) delivered in-band.
+
+**Spelling corrected 2026-09-02 by F-04.** Those four were originally written here in camelCase. They are not: every `_meta.kiro.kind` is `snake_case`, and `promptTurnSummaries` is a field inside `turn_completion` rather than a kind of its own. Nothing in the capture changed — this section transcribed it wrong, and building the parser against the fixture is what caught it.
 
 **Extension notifications are a separate set from `extensionMethods`.** The handshake's `extensionMethods` array lists only *client→agent* methods. These agent→client notifications were observed and appear in none of it: `_kiro/sessions/changed` (roster upserts/deletes with status transitions — drives a live session list), `_kiro/mcp/status`, `_kiro/governance/state`, `_kiro/tools/didChange`, `_kiro/powers/items_changed`, `_kiro/steering/documents_changed`, `_kiro/progressive_context/items_changed`, `_kiro/customAgent/config_error`.
 
