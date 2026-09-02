@@ -8,6 +8,7 @@ import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -22,6 +24,10 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.kiro.android.ui.common.HairlineSurface
 import dev.kiro.android.ui.common.InstrumentHeader
@@ -41,6 +48,7 @@ import dev.kiro.android.ui.theme.KiroLayout
 import dev.kiro.android.ui.theme.KiroMotion
 import dev.kiro.android.ui.theme.KiroTheme
 import dev.kiro.android.ui.theme.LocalReduceMotion
+import dev.kiro.core.model.CloudSession
 import dev.kiro.core.model.ToolCall
 import dev.kiro.core.model.TranscriptEntry
 import dev.kiro.core.session.TranscriptReducer
@@ -58,6 +66,65 @@ import dev.kiro.core.session.TranscriptReducer
  *    design constraint, not an optimisation: a string growing 30–60×/second
  *    inside a virtualised list is the canonical way to make a transcript stutter.
  */
+/**
+ * The repo-visibility gap this closes: a session's repositories were only ever
+ * shown as one name in the session list row. This header names all of them,
+ * and turns "I want to work on this repo again" into a one-tap action rather
+ * than requiring the user to retype the slug on the create screen.
+ *
+ * Never implies a *running* session's repos can change (ADR-004 §5) — the only
+ * "switch" on offer is starting a fresh session pre-seeded with the same repos.
+ */
+@Composable
+fun TranscriptHeader(
+    session: CloudSession,
+    onBack: () -> Unit,
+    onNewSessionInRepo: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = KiroTheme.colors
+    Column(
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = KiroLayout.ScreenGutter, vertical = 4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back to sessions",
+                    tint = colors.text,
+                )
+            }
+            Text(
+                session.title ?: session.repositories.firstOrNull()?.name ?: session.id,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleMedium,
+                color = colors.textStrong,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (session.repositories.isNotEmpty()) {
+            Text(
+                session.repositories.joinToString(", ") { it.name },
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "New session in this repo",
+                modifier = Modifier
+                    .heightIn(min = KiroLayout.TouchTarget)
+                    .clickable(onClick = onNewSessionInRepo),
+                style = MaterialTheme.typography.labelLarge,
+                color = colors.accent,
+            )
+        }
+    }
+}
+
 @Composable
 fun TranscriptScreen(
     state: TranscriptReducer.State,

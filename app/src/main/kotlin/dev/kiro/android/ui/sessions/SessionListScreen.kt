@@ -286,6 +286,8 @@ private fun SessionRow(
             statusLine(session),
             style = MaterialTheme.typography.labelMedium,
             color = colors.muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -295,8 +297,13 @@ private fun SessionRow(
  *
  * "Idle and warm" opens instantly; "idle but suspended" means waiting for a VM to
  * come back. Collapsing them into one word is the specific mistake F-10 calls out.
+ *
+ * Prepends the repo names when there is more than one: the row's title only
+ * ever shows the first repo (or falls back to the session's title), so a
+ * second (or third+) repo on a multi-repo session was otherwise invisible.
  */
 private fun statusLine(session: CloudSession): String {
+    val repos = repoSummary(session)
     val agent = when (session.status) {
         SessionStatus.IN_PROGRESS -> "working"
         SessionStatus.IDLE -> "idle"
@@ -309,7 +316,16 @@ private fun statusLine(session: CloudSession): String {
         InstanceStatus.UNKNOWN -> null
     }
     val mode = session.agentMode?.let { "· $it" }
-    return listOfNotNull(agent, instance, mode).joinToString(" · ")
+    return listOfNotNull(repos, agent, instance, mode).joinToString(" · ")
+}
+
+/** Null for a single-repo session -- the title already names it. */
+private fun repoSummary(session: CloudSession): String? {
+    if (session.repositories.size <= 1) return null
+    val names = session.repositories.map { it.name }
+    val shown = names.take(2).joinToString(", ")
+    val extra = names.size - 2
+    return if (extra > 0) "$shown +$extra" else shown
 }
 
 /**

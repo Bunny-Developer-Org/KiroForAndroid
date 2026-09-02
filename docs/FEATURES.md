@@ -148,7 +148,7 @@ Read [AUTHENTICATION.md](AUTHENTICATION.md) in full before starting any of these
 - **Done when:** the list reflects real status, survives rotation and process death, and handles the empty state as an invitation to create a session rather than a blank screen. **Shipped 2026-09-02**: delete (confirmation dialog, wired to the already-working `gateway.deleteSession`) and pin (client-local, DataStore-persisted, sorted to top) via a new `SessionListViewModel` that also fixes the rotation/process-death survival gap by replacing the old `remember{}` state in `AppNavigation`.
 - **Depends on:** F-05. Can be built against `FakeGateway` before F-03 lands.
 
-### F-11 · New Cloud Session flow · `L` · 🟡 **PARTIAL** — repo multi-select, manual entry, mode, first prompt and the documented failure messages done; not exercised against a real create (spends credits)
+### F-11 · New Cloud Session flow · `L` · 🟡 **PARTIAL** — repo multi-select, manual entry, mode, first prompt and the documented failure messages done; all three ADR-004 §5 picker layers now present (catalog, MRU-derived recents, and manual entry with removable pills — the previously-missing recents layer and the previously-invisible manual pill are both shipped 2026-09-02); not exercised against a real create (spends credits)
 **The headline feature.** The whole reason the app exists.
 
 - **Do:** a create flow with — repository multi-select from the user's connected GitHub/GitLab account (removable pills, matching how other Kiro surfaces present bound repos); model selection; autonomy level (**Autopilot** or **Autonomous** only — Supervised does not exist for cloud sessions); first-prompt composer; submit, provision, and land in the live transcript.
