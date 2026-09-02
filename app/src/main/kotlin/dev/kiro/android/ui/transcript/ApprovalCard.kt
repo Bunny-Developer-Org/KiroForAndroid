@@ -12,8 +12,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -72,23 +75,30 @@ fun ApprovalCard(
                 ),
             ),
     ) {
-        Box(
+        Row(
             modifier
                 .fillMaxWidth()
+                .height(IntrinsicSize.Min)
                 .clip(shape)
                 .background(colors.card)
                 .border(1.dp, colors.border, shape),
         ) {
-            // The role edge: warn while pending.
+            // The role edge: warn while pending. A sibling with a fixed width next
+            // to the content, not an overlay -- Box's matchParentSize() forces a
+            // matchParentSize child's *minWidth* to the parent's full width when
+            // that parent's width is already fixed (as fillMaxWidth() does here),
+            // so a trailing .width(3.dp) got silently clamped back up to full
+            // width and flooded the whole card in the role colour instead of
+            // drawing a 3dp edge.
             Box(
                 Modifier
-                    .matchParentSize()
+                    .fillMaxHeight()
                     .width(3.dp)
                     .background(colors.warn),
             )
 
             Column(
-                Modifier.padding(start = 17.dp, end = 14.dp, top = 10.dp, bottom = 10.dp),
+                Modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(

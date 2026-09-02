@@ -11,8 +11,11 @@ import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
@@ -72,25 +75,30 @@ fun UserInputCard(
                 ),
             ),
     ) {
-        Box(
+        Row(
             modifier
                 .fillMaxWidth()
+                .height(IntrinsicSize.Min)
                 .clip(shape)
                 .background(colors.card)
                 .border(1.dp, colors.border, shape),
         ) {
             // The role edge: a clarifying question, not a warning -- a distinct
             // colour from ApprovalCard's warn edge so the two are not confused at
-            // a glance.
+            // a glance. A sibling with a fixed width, not a matchParentSize()
+            // overlay: matchParentSize() forces a child's minWidth to the parent's
+            // full width once the parent's own width is fixed (fillMaxWidth() does
+            // that here), so the trailing .width(3.dp) was silently clamped back up
+            // to full width and flooded the whole card in the role colour.
             Box(
                 Modifier
-                    .matchParentSize()
+                    .fillMaxHeight()
                     .width(3.dp)
                     .background(colors.clarify),
             )
 
             Column(
-                Modifier.padding(start = 17.dp, end = 14.dp, top = 10.dp, bottom = 10.dp),
+                Modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
