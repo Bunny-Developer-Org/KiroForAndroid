@@ -19,6 +19,7 @@ import io.ktor.server.routing.post
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.request.header
+import io.ktor.server.routing.Route
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.webSocket
@@ -64,7 +65,31 @@ public class BridgeServer(
 
         val server = embeddedServer(CIO, port = config.port, host = config.bindAddress) {
             install(WebSockets)
-            routing {
+            routing { installRoutes() }
+        }
+
+        // One fan-out from the agent to every attached client. KAS already keeps
+        // per-session subscriber sets, so this stays a broadcast rather than a
+        // routing table we would have to keep correct.
+        scope.launch {
+            supervisor.frames.collect { message ->
+                if (message is RpcNotification) recordForReplay(message)
+                val encoded = JsonRpcCodec.encode(message)
+                clients.forEach { client ->
+                    runCatching { client.send(encoded) }
+                        .onFailure { log.debug("dropping frame for a closed client") }
+                }
+            }
+        }
+
+        server.start(wait = wait)
+    }
+
+    /**
+     * Two routes and nothing else. `/pair` is the only unauthenticated one, and
+     * everything it can do is bounded by [PairingService].
+     */
+    private fun Route.installRoutes() {
                 // Auth-1's only unauthenticated endpoint, and the one the app hits
                 // first. Everything it can do is bounded by PairingService: the
                 // code is single-use, short-lived, and rate limited per address.
@@ -146,24 +171,6 @@ public class BridgeServer(
                         log.info("client detached ({} remain)", clients.size)
                     }
                 }
-            }
-        }
-
-        // One fan-out from the agent to every attached client. KAS already keeps
-        // per-session subscriber sets, so this stays a broadcast rather than a
-        // routing table we would have to keep correct.
-        scope.launch {
-            supervisor.frames.collect { message ->
-                if (message is RpcNotification) recordForReplay(message)
-                val encoded = JsonRpcCodec.encode(message)
-                clients.forEach { client ->
-                    runCatching { client.send(encoded) }
-                        .onFailure { log.debug("dropping frame for a closed client") }
-                }
-            }
-        }
-
-        server.start(wait = wait)
     }
 
     private fun recordForReplay(notification: RpcNotification) {

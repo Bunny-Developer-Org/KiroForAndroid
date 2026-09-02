@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The launcher icon is the one place a colour literal must live outside
+         Palette.kt: adaptive icons are resources, not composables. -->
+    <color name="ic_launcher_background">#12141A</color>
+</resources>
