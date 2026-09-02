@@ -191,6 +191,8 @@ F-03 was scoped as a `L` (1–2 weeks) partly because it was to build reconnect,
 
 It also **weakens the case for inventing our own `_bridge/…` sequence-number replay protocol** ([ACP-INTEGRATION §7](ACP-INTEGRATION.md#7-reconnect-and-replay--our-design-not-kiros)). Every update already carries `_meta.kiro.messageId` and `timestamp`, and `session/load` replays history in order. F-03 should try resume-by-`messageId` before designing a parallel numbering scheme.
 
+**Resolved, 2026-09-02:** F-03 did exactly that. The bridge's `SessionLog` keys its replay log by `messageId`, not an invented sequence number, and answers `_bridge/resume {sessionId, afterMessageId}` — see [ACP-INTEGRATION §7](ACP-INTEGRATION.md#7-reconnect-and-replay--our-design-not-kiros) for the shipped contract. The one piece still open is that the app client doesn't call `_bridge/resume` yet (full `session/load` on every reconnect), tracked under F-15.
+
 **Caveat on this section:** unlike §3, these findings come from reading KAS's shipped type declarations rather than from observed traffic. They describe intent accurately but were not exercised end-to-end. Treat them as a strong prior for F-03's design, and verify each before depending on it.
 
 ---
@@ -221,7 +223,7 @@ A server-issued `requestId` and `faultKind: "serviceRejection"` mean the key was
 
 **Method caveat, stated plainly:** this was *not* run in a container with an empty `~/.kiro`, as F-01's brief specifies. That control was aimed at ruling out a cached-login fallback, and the stderr line rules it out more directly — mode selection is announced, and the remote call failed under the key rather than silently succeeding under the stored Google login. Someone with a real key should still do the container run before the bridge depends on this.
 
-### Two consequences
+### Three consequences
 
 **1. The pty is now optional, not mandatory.** [A6](#a6--login---use-device-flow-is-scriptable--partially-refuted) forces F-03 and F-08 to drive a provider-picker TUI over a pty. An API-key-provisioned bridge skips that path entirely: paste one key, no `kiro-cli login`, no TUI. F-03 should implement API-key provisioning **first** — it is a few lines — and treat pty login as the second, harder path it still owes F-08. This does not remove F-08: the key authenticates the *bridge host*, and the product requirement is that the *user* signs in from their phone through a browser. It removes pty login from the bridge's critical path, not from the backlog.
 

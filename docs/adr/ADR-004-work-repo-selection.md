@@ -104,13 +104,13 @@ The user types the repository. Validate the shape client-side; let the server re
 - **Con:** poor on a phone; typo-prone; gives no discovery for a user who does not remember exact casing or the org prefix.
 - **Verdict:** **Accepted as the floor.** Never the only affordance, never removed — it is what still works when everything else is unavailable.
 
-### Option B — Drive the `/repo` picker through the commands extension
+### Option B — Query the repository catalog directly
 
-[ACP-INTEGRATION §5](../ACP-INTEGRATION.md#5-kiro-extensions) documents `commands/available`, `commands/options` (autocomplete for a partial command) and `commands/execute`. If `/repo` participates, `commands/options` returns candidate repositories and `commands/execute` attaches them — a real list and a real binding, over the documented ACP extension surface.
+**Superseded by §7's A9 finding, 2026-09-02 — read this section in that light.** This option originally proposed driving the `/repo` picker through the commands extension: [ACP-INTEGRATION §5](../ACP-INTEGRATION.md#5-kiro-extensions) documents `commands/available`, `commands/options` (autocomplete for a partial command) and `commands/execute`, and if `/repo` participated, `commands/options` would return candidate repositories for `commands/execute` to attach. That mechanism was never confirmed to work, because F-01's spike found something better already live: **`_kiro/sourceProviders/list` and `/listResources` return the full repository catalog directly** — providers with `connectionStatus`, repos with `visibility` and `defaultBranch` — no slash command, no autocomplete round-trip, no dependency on an experimental extension whose namespace prefix Kiro's own docs [contradict themselves on](ADR-001-cloud-session-access.md#1-the-problem). See [PROTOCOL-FINDINGS §3 A4](../PROTOCOL-FINDINGS.md#a4--repositories-are-bindable-programmatically--verified-and-better-than-assumed).
 
-- **Pro:** the only path to a genuine picker that does not invent a credential or a private endpoint. Reuses machinery F-19 builds anyway.
-- **Con:** the extensions are documented as experimental and subject to change, and even the namespace prefix is [contradictory in Kiro's own docs](ADR-001-cloud-session-access.md#1-the-problem). Whether `/repo` exposes options at all is unknown. May only work *after* a session exists, which inverts F-11's flow (create, then attach) relative to `--repo` at creation.
-- **Verdict:** **Preferred when it works.** Strictly an enhancement layered on Option A.
+- **Pro:** a real list and a real binding over a documented-by-observation surface that already returns everything the old `commands/options` proposal hoped for, with richer metadata (connection status, visibility, default branch) and no experimental slash-command dependency.
+- **Con:** `_kiro/sourceProviders/*` is still an undocumented `_kiro/` extension, discovered by observation rather than published — the usual tolerant-parsing rules apply (ADR-003 §3).
+- **Verdict:** **Preferred, and no longer conditional on "if it works"** — it was observed working. The original `commands/options`-based approach is demoted to a historical fallback note, not a live plan; F-19 (slash commands/autocomplete) may still use `commands/options` for its own purpose, but the repo picker does not need it.
 
 ### Option C — Scrape the interactive TUI
 
@@ -163,7 +163,7 @@ interface RepoCatalog {
 
 Three implementations, tried in order, each falling through:
 
-1. **`CommandsRepoCatalog`** (Option B) — `suggest()` via `commands/options`. Returns empty and logs one metric if the extension is absent, mis-prefixed, or errors. Never throws into the UI.
+1. **`SourceProvidersRepoCatalog`** (Option B, corrected 2026-09-02) — `suggest()` via `_kiro/sourceProviders/list` + `/listResources`, not `commands/options` as originally drafted here (see §4 Option B). Returns empty and logs one metric if the extension is absent, mis-prefixed, or errors. Never throws into the UI. The shipped `BridgeGateway` already calls `sourceProvidersList`/`sourceProvidersListResources` (`core/src/main/kotlin/dev/kiro/core/session/BridgeGateway.kt`); the `RepoCatalog` wrapper described here is the UI-facing seam F-11 builds on top of it.
 2. **`SessionHistoryRepoCatalog`** (Option E) — `recent()` from `listSessions()`, deduplicated, most-recently-used first. Persisted so it survives a cold start with no bridge.
 3. **`ManualEntryCatalog`** (Option A) — `parse()` only, and always reachable in the UI as "enter a repository."
 
@@ -183,7 +183,7 @@ And two things the UI must not offer, because Kiro cannot honour them:
 
 ## 6. What this costs us
 
-- **The picker is only as good as an experimental extension.** If `commands/options` does not cover `/repo`, most users see recents plus a text field. That is a real UX regression against Kiro Web's pill-based picker, and F-11 should not pretend otherwise in its copy.
+- **The picker is only as good as an undocumented extension.** `_kiro/sourceProviders/*` was observed working (§4 Option B, §7 A9) but is not a published API; if it disappears or changes shape, most users see recents plus a text field. That is a real UX regression against Kiro Web's pill-based picker, and F-11 should not pretend otherwise in its copy.
 - **First-run is the worst run.** A new user has no recents and possibly no connected provider, so their first encounter with the headline feature is a text field and a trip to a browser. Onboarding has to carry that weight deliberately.
 - **We inherit an invisible permission model.** "Installed and authorized for that repository" is org-owner state we cannot see, cannot change, and cannot explain precisely. The best we can do is fail with the right guess about why.
 - **Multi-provider is a presentation problem we get for free and should not squander.** Sessions can mix GitHub and GitLab; a picker that shows an undifferentiated list of slugs will confuse. Provider is part of the identity, so it is part of the pill.

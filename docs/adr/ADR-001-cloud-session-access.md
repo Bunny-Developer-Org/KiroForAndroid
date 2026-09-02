@@ -81,6 +81,8 @@ Ask Kiro for a documented third-party API, or for the app to be sanctioned.
 
 Two things to read out of that. The maintainer reply is a **weaker signal than a commitment but a stronger one than silence**, which is what F-00 previously recorded — this option is not dead. But all three requests are about reaching a **local** session remotely; *none* asks for third-party API access to **cloud** sessions, which is what would actually retire Option B. That gap is F-00's real job.
 
+**Which one to join is not a coin flip between the three.** #9460 is explicitly about the **IDE** session and explicitly says it does *not* want the `kiro-cli` + ACP path — joining it would argue for the wrong surface. #7993 asks for remote **CLI** sessions from web/mobile, which is our brief exactly; that is the one to join. #6099 (IDE, highest reaction count) is worth an upvote for general pressure but is, like #9460, an IDE-surface ask. See F-00 for the up-to-date read.
+
 Note also that all three are periodically flagged as duplicates of each other by Kiro's automation and rescued by their authors, so demand is split three ways and never accumulates into a single number.
 
 ### Option D — Do nothing / wait for official Android
@@ -97,7 +99,7 @@ Kiro's docs say iOS with "documentation coming soon"; nothing published commits 
 
 Two rules follow, and they are the whole point of this ADR:
 
-1. **The app never hard-codes a backend.** All session operations go through one interface — call it `CloudSessionGateway` — with `createSession`, `listSessions`, `loadSession`, `prompt`, `cancel`, `setModel`, `respondToPermission`, and a `Flow` of session updates. `BridgeGateway` implements it. If Option A or C ever becomes viable, it is a new implementation of the same interface, not a rewrite.
+1. **The app never hard-codes a backend.** All session operations go through one interface — call it `CloudSessionGateway` — with `createSession`, `listSessions`, `loadSession`, `prompt`, `cancel`, `setModel`, `respondToPermission`, and a `Flow` of session updates. (The shipped interface has grown beyond this list — `respondToUserInput` and flows for `userInputRequests`/roster changes were added as F-01 and later work surfaced channels this ADR didn't anticipate; see [F-05](../FEATURES.md) and [F-14](../FEATURES.md) — but the shape of the rule, not the exact method list, is what this ADR fixes.) `BridgeGateway` implements it. If Option A or C ever becomes viable, it is a new implementation of the same interface, not a rewrite.
 2. **No reverse-engineered endpoints land in this repo.** A PR that adds a guessed `app.kiro.dev` API call gets rejected on principle, not on style. If someone wants that, it belongs in a fork.
 
 ### Topology
