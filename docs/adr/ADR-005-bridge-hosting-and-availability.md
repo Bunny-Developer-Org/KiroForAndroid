@@ -100,6 +100,8 @@ Ship the bridge as an OCI image with a documented `docker run`, a persistent vol
 - **Con:** a container image containing a signed-in agent CLI needs its threat model written down, not assumed.
 - **Verdict:** **Adopt as the primary distribution form** for the bridge. This *is* how B and A get delivered.
 
+[`bridge/Dockerfile`](../../bridge/Dockerfile) and [docs/HOSTING.md](../HOSTING.md) are the concrete result: a container image plus two low-cost, self-hosted paths (a free GCE VM, Cloudflare Tunnel for reaching it) with runnable scripts under [`tools/deploy/`](../../tools/deploy/).
+
 ### Option D — A multi-tenant bridge hosted by this project
 
 We run bridges; users point the app at ours.

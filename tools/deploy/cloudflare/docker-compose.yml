@@ -1,0 +1,48 @@
+# Runs the bridge (bridge/Dockerfile) and cloudflared together on one Docker
+# network, so cloudflared can reach the bridge by service name without
+# publishing the bridge's port to the host at all.
+#
+# Prerequisites: build the bridge image first (`docker build -t kiro-bridge
+# -f bridge/Dockerfile .` from the repo root — see bridge/Dockerfile's own
+# header: unbuilt/unverified in this environment, no Docker available here),
+# and run tools/deploy/cloudflare/setup-tunnel.sh once to create the tunnel
+# and get a token via `cloudflared tunnel token <name>`.
+#
+# NOT RUN while writing this — no Docker in this environment. Verified only
+# by reading cloudflared's and the bridge image's own documented flags.
+#
+# Usage:
+#   export KIRO_API_KEY=...
+#   export CLOUDFLARE_TUNNEL_TOKEN=...   # from: cloudflared tunnel token kiro-bridge
+#   docker compose -f tools/deploy/cloudflare/docker-compose.yml up -d
+services:
+  bridge:
+    image: kiro-bridge
+    restart: unless-stopped
+    environment:
+      KIRO_API_KEY: "${KIRO_API_KEY:?set KIRO_API_KEY before starting}"
+    volumes:
+      - kiro-bridge-state:/home/bridge/.kiro-bridge
+      - kiro-cli-state:/home/bridge/.local/share/kiro-cli
+    # No `ports:` — cloudflared reaches this container over the compose
+    # network by service name (http://bridge:8765), and nothing else needs
+    # to. This is the same loopback-only posture BridgeConfig defaults to,
+    # just scoped to the compose network instead of localhost.
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: "${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN before starting}"
+    depends_on:
+      - bridge
+    # A token-run tunnel (rather than --config) takes its ingress rules from
+    # the Cloudflare dashboard, not a local file — set the ingress service
+    # there to ws://bridge:8765 to match this compose network's service
+    # name. See config.yml.example in this directory for the config-file
+    # equivalent if you'd rather manage ingress locally.
+
+volumes:
+  kiro-bridge-state:
+  kiro-cli-state:

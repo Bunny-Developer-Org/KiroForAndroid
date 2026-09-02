@@ -56,6 +56,8 @@ By default it binds `127.0.0.1`, and it **refuses to start** on any other addres
 
 To provision it without an interactive login, set `KIRO_API_KEY`. One caveat worth knowing: that variable overrides whatever account the CLI is signed in as, and there is no flag to suppress it.
 
+Want it always on instead of on your laptop? [docs/HOSTING.md](docs/HOSTING.md) covers a free Google Cloud VM and Cloudflare Tunnel, with scripts under [tools/deploy/](tools/deploy/).
+
 ## Documents
 
 Read in this order:

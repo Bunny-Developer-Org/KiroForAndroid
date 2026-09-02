@@ -1,0 +1,20 @@
+# Template for ~/.cloudflared/config.yml. setup-tunnel.sh writes this file
+# for you with real values filled in; this copy exists as a reference for
+# anyone wiring the docker-compose path by hand, or reading this directory
+# without running the script yet.
+#
+# tunnel / credentials-file: printed by `cloudflared tunnel create <name>`.
+tunnel: <TUNNEL_ID>
+credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  # `ws://` here, not `http://` — cosmetic (Cloudflare upgrades either
+  # scheme's connection automatically) but states the intent. `service`
+  # points at wherever the bridge is actually reachable from cloudflared's
+  # network namespace: `localhost` if they run on the same host, or the
+  # bridge container's service name if run via the docker-compose.yml in
+  # this directory.
+  - hostname: bridge.example.com
+    service: ws://localhost:8765
+  # Required catch-all — cloudflared refuses to start without one.
+  - service: http_status:404
