@@ -41,14 +41,20 @@ No `client_id`, authorization endpoint, or token endpoint is published for third
 
 The user never types a password into our app, and our app never sees a Kiro token.
 
+> **Corrected by [F-01](PROTOCOL-FINDINGS.md#a6--login---use-device-flow-is-scriptable--partially-refuted).** The flow below survives, but one assumption in it was wrong: `--use-device-flow` is **not** non-interactive. Before printing anything parseable, the CLI opens a provider-picker TUI on its pty. So **provider selection moves into the app**, and the bridge must drive a pty rather than read a pipe. The diagram and requirements are updated accordingly.
+
 ```
  Android app                Bridge                    kiro-cli              Browser (phone)
      │                        │                          │                        │
-     │  1. POST /auth/kiro/start                         │                        │
+     │  1. POST /auth/kiro/start { provider }            │                        │
      ├───────────────────────►│                          │                        │
-     │                        │  2. spawn                │                        │
+     │                        │  2. spawn on a PTY       │                        │
      │                        │  kiro-cli login          │                        │
      │                        │  --use-device-flow       │                        │
+     │                        ├─────────────────────────►│                        │
+     │                        │                          │                        │
+     │                        │  2b. answer the provider │                        │
+     │                        │      picker TUI          │                        │
      │                        ├─────────────────────────►│                        │
      │                        │                          │                        │
      │                        │  3. parse verification   │                        │
@@ -72,7 +78,17 @@ Properties worth noting:
 
 - **The Kiro token lives only on the bridge host**, managed by `kiro-cli` in its own credential store. The app stores nothing belonging to Kiro. This materially shrinks the blast radius of a compromised phone.
 - **It is genuinely OAuth via web link** — the user completes a real OAuth flow at a Kiro-controlled URL in a real browser.
-- Works with **every** provider Kiro supports, because provider selection happens in the browser, not in our UI. We don't have to know or care whether the user is on Builder ID or Okta.
+- Works with **every** provider Kiro supports — but the app must *ask which*, because the CLI does. F-01 observed the picker offering **Use with Builder ID · Use with Google · Use with GitHub · Use with Your Organization**, with no flag to preselect. Mirror those four; there is no way to defer the choice to the browser.
+
+### What the CLI actually prints
+
+```
+To sign in with Google, visit:
+  https://app.kiro.dev/account/device?user_code=XXXX-XXXX&login_provider=Google
+And confirm the code: XXXX-XXXX
+```
+
+Both values are extractable, and **the verification URI already carries the user code as a query parameter** — so the Custom Tab can open pre-filled and the code becomes a fallback rather than a transcription chore. Progress then renders as a spinner until the exchange completes.
 
 ### Requirements
 
@@ -80,7 +96,10 @@ Properties worth noting:
 - Display the user code prominently, tappable to copy, and keep it visible when the app returns to the foreground.
 - Respect `interval` and `expires_in`; surface expiry with a one-tap restart.
 - Handle the full RFC 8628 error set: `authorization_pending` (keep waiting), `slow_down` (back off), `access_denied`, `expired_token`.
-- Sign-in may already be satisfied — always probe `kiro-cli whoami` first and skip the flow if the host is signed in.
+- **Present the provider picker in the app** and pass the choice to the bridge; the bridge answers the CLI's TUI on its pty. There is no non-interactive path.
+- Sign-in may already be satisfied — always probe `kiro-cli whoami --format json` first and skip the flow if the host is signed in. Signed in it returns `{"accountType": "…", "email": "…"}`; signed out, `{"account": null}`.
+- **`login` refuses while already signed in**, exiting non-zero with `error: Already logged in, please logout with kiro-cli logout first`. Re-authentication therefore requires an explicit `kiro-cli logout` — which is destructive and ends cloud access for every connected client. Make it a deliberate, confirmed user action; **never an automatic retry** on an auth error.
+- **`whoami` exposes no entitlement.** There is no plan field, so the app cannot pre-check Pro eligibility. `NotEntitled` (§6) has to be derived from the error a cloud session create actually returns.
 
 ---
 
@@ -139,12 +158,15 @@ Auth is not a boolean. The state machine:
 
 ## 7. Open questions
 
-Answered by the F-01 spike:
+**Answered by the F-01 spike (2026-09-02)** — full detail in [PROTOCOL-FINDINGS §3 A6](PROTOCOL-FINDINGS.md#a6--login---use-device-flow-is-scriptable--partially-refuted):
 
-1. Can `kiro-cli login --use-device-flow` be driven non-interactively enough to reliably scrape the verification URI and user code? If output parsing proves brittle, fall back to a one-time manual sign-in on the host — worse UX, still shippable.
-2. Does `kiro-cli whoami --format json` expose entitlement, or only identity? If only identity, `NotEntitled` has to be inferred from a failed session creation.
-3. What is the actual lifetime of CLI credentials, and does the CLI refresh silently? Determines whether `TokenExpired` is rare or routine.
-4. Is there any supported way to detect sign-in state changes without polling `whoami`?
+1. ~~Can `login --use-device-flow` be driven non-interactively?~~ **Partly.** The verification URI and user code are printed parseably, and the URI carries the code as a query parameter. But the CLI shows an interactive provider picker first, with no flag to preselect — so the bridge needs a **pty**, and the app needs its own provider list. Not brittle, just more work than assumed; the manual-sign-in fallback is not needed.
+2. ~~Does `whoami --format json` expose entitlement?~~ **Identity only** — `accountType` and `email`, or `{"account": null}` when signed out. `NotEntitled` must be inferred from a failed session creation, as feared.
+
+**Still open:**
+
+3. What is the actual lifetime of CLI credentials, and does the CLI refresh silently? Determines whether `TokenExpired` is rare or routine. *Not answered by F-01 — needs observation over days, not one session.* One lead: KAS logs `Auth: --auth=acp-callback (host-mediated refresh via _kiro/auth/getAccessToken)`, which suggests refresh is delegated to whoever owns the token — the CLI, under `--auth-method cli`.
+4. Is there any supported way to detect sign-in state changes without polling `whoami`? *Still open.* Note that `_kiro/auth/getAccessToken` is a **client-implemented** method — an ACP client can be asked to supply a token, which is a different trust model worth understanding before F-03 settles its design.
 
 ---
 

@@ -17,16 +17,18 @@ Each item is scoped to be picked up independently by one agent. Read [§ How to 
 - **Done when:** the outcome is recorded in ADR-001 §2 Option C with a date, whatever the outcome. "No reply after N weeks" is a valid, recorded result.
 - **Depends on:** nothing.
 
-### F-01 · Protocol spike: verify assumptions, capture golden fixtures · `M`
-**The highest-value item in this backlog.** ADR-001 §5 lists six load-bearing assumptions (A1–A6) that are currently unverified. If A1/A2/A5 are wrong, the architecture changes. Estimates for Phase 1+ are not credible until this reports.
+### F-01 · Protocol spike: verify assumptions, capture golden fixtures · `M` · ✅ **DONE 2026-09-02**
+**Was the highest-value item in this backlog**, and it paid. Report: **[PROTOCOL-FINDINGS.md](PROTOCOL-FINDINGS.md)**. Verdicts are in [ADR-001 §5](adr/ADR-001-cloud-session-access.md#5-assumptions--resolved-by-f-01-on-2026-09-02); fixtures are in [`core/src/test/resources/fixtures/`](../core/src/test/resources/fixtures/); the probe that produced them is [`tools/acp-probe/`](../tools/acp-probe/).
 
-- **Do:** on a machine with a real `kiro-cli` and a Pro account — create a cloud session with `--cloud --repo`; try attaching via `kiro-cli acp` and `session/load`; capture the raw JSON-RPC frames for a full turn including at least one tool call and one permission prompt; determine how repositories are bound programmatically; determine the real `_kiro` extension prefix; test whether `login --use-device-flow` output can be parsed for the verification URI and code; check what `whoami --format json` exposes about entitlement.
-- **Done when:**
-  - ADR-001 §5 is updated with a verified/refuted verdict per assumption.
-  - Real frame sequences are committed as JSONL fixtures under `core/src/test/resources/fixtures/` (redact tokens, repo names, and paths).
-  - A written note names any assumption that was refuted and what it implies.
-- **Scope out:** building anything. This is a research spike; its deliverables are fixtures and answers.
-- **Depends on:** access to `kiro-cli` + a Pro account. **This is a hard prerequisite — flag it immediately if unavailable, do not proceed by guessing.**
+**Outcome in one line:** the architecture holds. A1, A2, A4, A5 verified; A3 refuted harmlessly (the prefix is `_kiro/`, and it is discoverable from the handshake); A6 partially refuted (sign-in is *more* interactive than assumed).
+
+**Read PROTOCOL-FINDINGS before starting anything below.** Three of its findings change work already scoped here:
+
+1. **`kiro-cli acp` needs `--agent-engine v3 --auth-method cli`.** The default engine cannot see cloud sessions at all — a client using default flags would wrongly conclude the whole approach is dead.
+2. **KAS already implements much of F-03** — WebSocket ACP transport, multi-client multiplexing, permission correlation across reconnects, pending-permission re-send on attach.
+3. **The documented streaming update list is wrong and incomplete.** Real kinds are `snake_case`, there is no `TurnEnd` kind, and a large set of `_kiro/*` notifications is undocumented entirely.
+
+**Left open:** A5 was verified on a *local* session only — the cloud path is argued from KAS's design, not observed. F-03 confirms it on its first cloud turn.
 
 ---
 
@@ -41,19 +43,26 @@ Each item is scoped to be picked up independently by one agent. Read [§ How to 
 ### F-03 · Bridge service (MVP) · `L`
 The host-side process from ADR-001. Not a dev convenience — it is the product's backend.
 
-- **Do:** a process that runs where `kiro-cli` is installed and: spawns/supervises the CLI as an ACP agent; exposes JSON-RPC over an authenticated WebSocket; issues single-use pairing codes and long-lived revocable device tokens; assigns monotonic sequence numbers and maintains a per-session replay log; implements the `_bridge/…` control messages from [ACP-INTEGRATION §7](ACP-INTEGRATION.md#7-reconnect-and-replay--our-design-not-kiros).
+- **Start by reading [PROTOCOL-FINDINGS §4](PROTOCOL-FINDINGS.md#4-the-larger-finding-kas-already-solves-most-of-f-3).** This item was sized `L` partly to build reconnect, replay, and cross-connection permission correlation from scratch. KAS ships all three. **Do not build them before establishing what you can reuse** — the honest first task here is a day of reading, not a week of coding.
+- **Do:** a process that runs where `kiro-cli` is installed and: spawns/supervises `kiro-cli acp --agent-engine v3 --auth-method cli` (the flags are mandatory — see PROTOCOL-FINDINGS §2); exposes JSON-RPC over an authenticated WebSocket; issues single-use pairing codes and long-lived revocable device tokens; and preserves ordered replay across reconnects.
+- **Replay: try `messageId` before inventing sequence numbers.** Every update already carries `_meta.kiro.messageId` and `timestamp`, and `session/load` replays history in order. The `_bridge/…` scheme in [ACP-INTEGRATION §7](ACP-INTEGRATION.md#7-reconnect-and-replay--our-design-not-kiros) is our design, not Kiro's, and may now be redundant. Record which way you went and why.
+- **Login needs a pty, not a pipe.** `kiro-cli login --use-device-flow` opens an interactive provider-picker TUI before printing anything parseable (PROTOCOL-FINDINGS A6). Budget for it.
+- **Confirm A5 on your first cloud turn** and update ADR-001 §5.
 - **Security requirements** (from [AUTHENTICATION §4](AUTHENTICATION.md#4-auth-1-pairing-the-app-to-the-bridge), all mandatory): binds `127.0.0.1` by default with explicit opt-in to `0.0.0.0`; TLS required for non-loopback; pairing codes single-use and ~5 min TTL; rate-limited pairing; revocable device list.
 - **Done when:** a WebSocket client can pair, create a cloud session, send a prompt, receive streamed updates, disconnect mid-turn, reconnect with `lastSeq`, and receive exactly the missed updates with no gap and no duplication.
 - **Decide and record:** bridge language (Kotlin/JVM vs Node/TS) per [ADR-003 §2](adr/ADR-003-tech-stack.md#bridge-language--open-decision). Write the outcome back into that ADR.
 - **Depends on:** F-01 (needs verified CLI behaviour).
 
 ### F-04 · ACP protocol layer in `core/` · `M` ∥
-- **Do:** JSON-RPC 2.0 codec (request / response / notification / server-initiated request), `AcpTransport` interface, `AcpClient` handling correlation, timeouts, and cancellation. Implement the handshake from [ACP-INTEGRATION §2](ACP-INTEGRATION.md#2-handshake) — including advertising `fs` and `terminal` as **false**, which is intentional and differs from Kiro's editor example. Accept **either** `_kiro/` or `_kiro.dev/` prefixes. `ignoreUnknownKeys = true` throughout.
-- **Done when:** unit tests pass against a fake transport and against F-01's golden fixtures; an unknown method or malformed frame is logged and dropped without terminating the session (test this explicitly).
-- **Depends on:** F-02. Benefits from F-01's fixtures but can start against the documented method set.
+- **Do:** JSON-RPC 2.0 codec (request / response / notification / server-initiated request), `AcpTransport` interface, `AcpClient` handling correlation, timeouts, and cancellation. Implement the handshake from [ACP-INTEGRATION §2](ACP-INTEGRATION.md#2-handshake) — including advertising `fs` and `terminal` as **false**, which is intentional and differs from Kiro's editor example. `ignoreUnknownKeys = true` throughout.
+- **Derive the extension prefix from `initialize`**, don't match constants. The handshake enumerates the agent's extension methods and the namespace is server-configurable. (`_kiro/` is what 2.19.2 sends.)
+- **Model the real update set, not the documented one.** Most session state arrives as `session_info_update` discriminated by `_meta.kiro.kind` — `turn_start`, `turn_end`, `context_usage`, `focus_update`, `pendingInteraction`, `interactionResolved`, `promptTurnSummaries`, `displayError`. There is no `TurnEnd` update kind. See [PROTOCOL-FINDINGS §5](PROTOCOL-FINDINGS.md#5-corrections-to-the-documented-protocol).
+- **Done when:** unit tests pass against a fake transport and against F-01's golden fixtures in [`core/src/test/resources/fixtures/`](../core/src/test/resources/fixtures/); an unknown method or malformed frame is logged and dropped without terminating the session (test this explicitly — F-01 found a large undocumented `_kiro/*` notification set, so this is load-bearing, not polish).
+- **Depends on:** F-02. Fixtures are ready.
 
 ### F-05 · `CloudSessionGateway` + `BridgeGateway` · `M`
-- **Do:** the interface every feature codes against — `createSession`, `listSessions`, `loadSession`, `prompt`, `cancel`, `setModel`, `setMode`, `respondToPermission`, and `updates: Flow<SessionUpdate>`. Plus `BridgeGateway`, implementing it over F-04.
+- **Do:** the interface every feature codes against — `createSession`, `listSessions`, `loadSession`, `prompt`, `cancel`, `setModel`, `setMode`, `respondToPermission`, `respondToUserInput`, and `updates: Flow<SessionUpdate>`. Plus `BridgeGateway`, implementing it over F-04.
+- **Shapes fixed by F-01:** `listSessions` takes a source (`local`/`remote`/`all`) and a scope (`workspace`/`user`/`both`); a session carries **two** statuses — `status` (is the agent working) and `instanceStatus` (is the sandbox VM up) — and they must stay distinct all the way to the UI. `respondToUserInput` exists because `_kiro/userInput` is a second human-in-the-loop channel alongside permissions.
 - **Why it matters:** this is the seam that makes ADR-001's decision reversible. If official API access ever lands, it is a second implementation, not a rewrite.
 - **Done when:** no UI code anywhere references a transport, a socket, or the bridge directly; a `FakeGateway` exists so UI items can be built and tested without a bridge.
 - **Depends on:** F-04.
@@ -78,14 +87,16 @@ Read [AUTHENTICATION.md](AUTHENTICATION.md) in full before starting any of these
 ### F-08 · Kiro sign-in via device flow, relayed through the app · `M`
 **This is the user-facing "sign in with your Kiro account via a web link" feature.**
 
-- **Do:** implement the relay in [AUTHENTICATION §3](AUTHENTICATION.md#3-primary-flow--device-authorization-relayed-through-the-app). App asks the bridge to start sign-in; bridge drives `kiro-cli login --use-device-flow` and returns the verification URI + user code; app opens the URI in a **Custom Tab** and displays the code prominently with copy-to-clipboard; bridge polls; app reflects completion.
+- **Do:** implement the relay in [AUTHENTICATION §3](AUTHENTICATION.md#3-primary-flow--device-authorization-relayed-through-the-app). App asks the bridge to start sign-in **and names the provider**; bridge drives `kiro-cli login --use-device-flow` over a **pty**, answers its provider-picker TUI, and returns the verification URI + user code; app opens the URI in a **Custom Tab** and displays the code prominently with copy-to-clipboard; bridge polls; app reflects completion.
+- **Corrected by F-01 (A6):** provider selection happens in the *CLI*, not the browser, so the app must present the four providers itself — Builder ID, Google, GitHub, Your Organization. The verification URI already carries the user code as a query parameter, so the Custom Tab can arrive pre-filled. And `login` **refuses while already signed in** — re-auth requires an explicit `kiro-cli logout`, which must be a deliberate user action, never an automatic retry.
 - **Hard requirements:** Custom Tabs only — **never a WebView** ([RFC 8252 §8.12](https://datatracker.ietf.org/doc/html/rfc8252#section-8.12)). Handle `authorization_pending`, `slow_down`, `access_denied`, `expired_token`. Probe `kiro-cli whoami` first and skip the flow if already signed in. The user code must stay visible when returning to the foreground.
 - **Done when:** a signed-out bridge host can be brought to signed-in entirely from the phone, and no Kiro credential is ever stored in the app.
-- **Depends on:** F-03, F-07. Informed by F-01 (question 1: is the CLI output parseable?).
+- **Depends on:** F-03, F-07. Output format and its interactive prelude are pinned by [PROTOCOL-FINDINGS A6](PROTOCOL-FINDINGS.md#a6--login---use-device-flow-is-scriptable--partially-refuted).
 
 ### F-09 · Auth & entitlement state machine · `S`
 - **Do:** the seven-state machine in [AUTHENTICATION §6](AUTHENTICATION.md#6-session-and-error-states-the-ui-must-handle), driving navigation.
 - **Do not skip `NotEntitled`.** Cloud sessions require Pro or higher, and Identity Center orgs additionally require an admin to enable the preview. Without this state, an unentitled user gets an opaque failure at session creation and no idea why.
+- **You cannot pre-check entitlement.** F-01 found `whoami --format json` returns only `accountType` and `email` (and `{"account":null}` when signed out) — no plan or entitlement field. So `NotEntitled` has to be derived from the error a cloud create actually returns, not from a capability probe.
 - **Done when:** every state has a distinct screen or banner and a stated next action; state survives process death.
 - **Depends on:** F-07, F-08.
 
@@ -95,6 +106,8 @@ Read [AUTHENTICATION.md](AUTHENTICATION.md) in full before starting any of these
 
 ### F-10 · Session list, resume, delete · `M`
 - **Do:** list cloud sessions with live status, ordered by recent activity; resume into F-12; delete with confirmation; pin.
+- **Show both statuses.** A session carries `status` (`idle`/`in_progress`) and `instanceStatus` (the sandbox VM's own lifecycle, e.g. `suspended`). "Idle but suspended" and "idle and warm" mean different wait times when you tap in, and only one of them is instant.
+- **The roster pushes itself.** `_kiro/sessions/changed` delivers upserts and deletes with status transitions, so the list can be live without polling.
 - **Note:** renaming is not supported in the cloud-session preview — don't build the affordance.
 - **Done when:** the list reflects real status, survives rotation and process death, and handles the empty state as an invitation to create a session rather than a blank screen.
 - **Depends on:** F-05. Can be built against `FakeGateway` before F-03 lands.
@@ -105,12 +118,12 @@ Read [AUTHENTICATION.md](AUTHENTICATION.md) in full before starting any of these
 - **Do:** a create flow with — repository multi-select from the user's connected GitHub/GitLab account (removable pills, matching how other Kiro surfaces present bound repos); model selection; autonomy level (**Autopilot** or **Autonomous** only — Supervised does not exist for cloud sessions); first-prompt composer; submit, provision, and land in the live transcript.
 - **Constraints to honour rather than paper over:** repositories are fixed at creation time; **branches cannot be selected** — set the expectation in the UI and mention that the agent can be asked to create a branch once running; the preview caps concurrent sessions at 10, so handle that failure specifically.
 - **Done when:** a session can be created from the phone with 1..n repos and a first prompt, the composer is locked during provisioning with visible progress, and every documented failure mode has its own message.
-- **Depends on:** F-05, F-09. Repository listing mechanism comes from F-01 (assumption A4).
+- **Depends on:** F-05, F-09. **Easier than scoped:** F-01 found a first-class repository catalog — `_kiro/sourceProviders/list` gives providers with a `connectionStatus` (so "connect GitLab first" is renderable instead of an empty list), and `/listResources` gives repos with `visibility` and `defaultBranch`. Show the default branch; don't offer to change it.
 
 ### F-12 · Transcript rendering + streaming · `L`
-- **Do:** the live conversation view — user messages, agent messages, collapsible tool-call entries with status, and the four update kinds from [ACP-INTEGRATION §4](ACP-INTEGRATION.md#4-streaming-updates).
+- **Do:** the live conversation view — user messages, agent messages, collapsible tool-call entries with status, and the update kinds from [ACP-INTEGRATION §4](ACP-INTEGRATION.md#4-streaming-updates). There are **seven**, not four, and turn boundaries are not their own kind — see [PROTOCOL-FINDINGS §5](PROTOCOL-FINDINGS.md#5-corrections-to-the-documented-protocol).
 - **Performance design is a requirement, not an optimisation** ([ADR-003 §3](adr/ADR-003-tech-stack.md#3-two-conventions-that-are-load-bearing)): coalesce chunks on a ~60–100 ms tick; render the in-flight message **outside** the lazy list and append it only at `TurnEnd`; never recompute highlighting per token on a growing string.
-- **Done when:** a 500+ entry transcript scrolls smoothly on a mid-range device; an unknown update kind renders as a generic entry; `compaction/status` shows an indicator instead of an unexplained stall.
+- **Done when:** a 500+ entry transcript scrolls smoothly on a mid-range device; an unknown update kind renders as a generic entry; `compaction/status` shows an indicator instead of an unexplained stall. Note the real replay volume: F-01's cloud session replayed **991 updates** on a single `session/load`, so replay performance is on the critical path, not a tail case.
 - **Depends on:** F-05. Build against fixtures from F-01.
 
 ### F-13 · Prompt composer · `M`
@@ -120,13 +133,17 @@ Read [AUTHENTICATION.md](AUTHENTICATION.md) in full before starting any of these
 
 ### F-14 · Permission / approval UI · `M`
 - **Do:** surface agent-initiated permission requests and answer them. On attach, **check for a pending approval before the transcript finishes replaying** — Kiro holds a request raised while no client was attached and presents it to the next client, so this is durable state, not a transient event.
-- **Done when:** an approval can be granted or denied from the phone and the agent proceeds; a pending approval is never silently buried below the scroll.
-- **Depends on:** F-12. Payload shape comes from F-01 (assumption A5).
+- **Render `options[]` as sent.** F-01 observed four (`allow_once`, `allow_always`, `reject_once`, `reject_always`) but the list is agent-supplied — key off `kind`, don't hard-code. `_meta.kiro.consent` gives the capability, the concrete resource, and whether the ask was implicit — enough to make a notification readable without opening the session.
+- **`pendingInteraction` / `interactionResolved` arrive in the stream.** Use them to render the waiting state, and to clear it when *another* client answers first.
+- **Also build `_kiro/userInput`.** It is a second, distinct channel: the agent asking a free-text question mid-turn. Undocumented, and the plan did not know about it.
+- **Done when:** an approval can be granted or denied from the phone and the agent proceeds; a pending approval is never silently buried below the scroll; a free-text agent question can be answered or dismissed.
+- **Depends on:** F-12. Payload shape is pinned by [`prompt-turn-with-permission.jsonl`](../core/src/test/resources/fixtures/prompt-turn-with-permission.jsonl).
 
 ### F-15 · Connection lifecycle: foreground service, reconnect, replay · `L`
 The item that decides whether the app is trustworthy. A session that dies when the phone locks is a broken client regardless of how good the UI looks.
 
-- **Do:** a `dataSync` foreground service for active turns; exponential backoff with jitter; eager reconnect on connectivity-regained; the `lastSeq` replay protocol from [ACP-INTEGRATION §7](ACP-INTEGRATION.md#7-reconnect-and-replay--our-design-not-kiros); explicit handling of Android 15's 6h/24h `dataSync` cap including `onTimeout()`; Doze-aware behaviour.
+- **Do:** a `dataSync` foreground service for active turns; exponential backoff with jitter; eager reconnect on connectivity-regained; a replay protocol — **check F-03's decision first**, since `_meta.kiro.messageId` may make the `lastSeq` scheme in [ACP-INTEGRATION §7](ACP-INTEGRATION.md#7-reconnect-and-replay--our-design-not-kiros) unnecessary; explicit handling of Android 15's 6h/24h `dataSync` cap including `onTimeout()`; Doze-aware behaviour.
+- **Answering an approval does not require the original connection.** KAS correlates permissions by `toolCallId` (`_kiro/permission/respond`), which is exactly the mobile case: notification arrives, socket has since dropped, user taps Allow on a fresh one.
 - **Done when:** backgrounding the app, locking the phone, flipping wifi→cellular, and killing the socket mid-turn all resume with **no gap and no duplicate entries**; log truncation past `lastSeq` triggers an honest full refetch rather than a silent hole.
 - **Depends on:** F-03, F-12.
 
@@ -154,8 +171,12 @@ Cloud sessions deliver work through the source provider, usually as a pull reque
 Expose available slash commands from the `commands/available` notification with autocomplete via `commands/options`. Relay `mcp/oauth_request` URLs into a Custom Tab — the same browser-based pattern as F-08. Degrade silently if the extensions are absent.
 **Depends on:** F-04, F-12.
 
+### F-19b · Per-turn cost display · `S` ∥
+*Added by F-01.* Every turn ends with a `promptTurnSummaries` payload carrying credit spend and the tools used. Surface it — a running per-session cost is genuinely useful on a metered plan, and it is close to free given the data already arrives.
+**Depends on:** F-12.
+
 ### F-20 · Settings, logout, diagnostics · `S`
-Bridge management (re-pair, forget), Kiro sign-out, cached-transcript clearing, a log viewer for support, version info. Logout wipes tokens (F-06) and cached transcripts.
+Bridge management (re-pair, forget), Kiro sign-out, cached-transcript clearing, a log viewer for support, version info. Logout wipes tokens (F-06) and cached transcripts. **Kiro sign-out is destructive** — it runs `kiro-cli logout` on the bridge host, ending cloud access for every client, so confirm it explicitly.
 **Depends on:** F-06, F-09.
 
 ### F-21 · Accessibility, theming, large screens · `M`
@@ -175,7 +196,7 @@ Signing, versioning, reproducible builds, and a distribution decision. **Note:**
 ## How to pick up an item
 
 1. **Read [ADR-001](adr/ADR-001-cloud-session-access.md) first.** It rules out an entire (tempting) approach. A PR that adds a reverse-engineered `app.kiro.dev` endpoint is rejected on principle.
-2. **Check the phase.** Phase 0 gates real confidence in everything else. If you take a Phase 2+ item before F-01 reports, state which unverified assumptions you are relying on.
+2. **Read [PROTOCOL-FINDINGS.md](PROTOCOL-FINDINGS.md).** F-01 has reported. It corrects the documented protocol in several places and shrinks at least one item's scope; starting from the docs alone will send you down a path F-01 already closed.
 3. **Respect the seams.** UI items talk to `CloudSessionGateway` (F-05), never to a transport. `core/` takes no Android dependency — CI enforces this.
 4. **Use the paths in [ADR-003 §2](adr/ADR-003-tech-stack.md#2-module-layout).** If you need a new package, say so in the PR.
 5. **Definition of done:** acceptance criteria met · unit tests for `core/` logic · no new lint/detekt warnings · docs updated if a decision changed · tolerant parsing preserved.
@@ -197,7 +218,7 @@ F-02 ─► F-04 ─► F-05 ─┬─► F-10 ───────────
                                             F-19/20/21/23 ┘
 ```
 
-- **Start now, in parallel:** F-00, F-01, F-02.
+- **Start now, in parallel:** F-00, F-02. (F-01 is done — its fixtures and findings are ready for F-03/F-04.)
 - **Widest parallel band:** after F-05, the UI items (F-10, F-12, F-17, F-18) can all proceed against `FakeGateway` while F-03 and F-15 handle the hard infrastructure.
 - **Single-threaded chain:** F-03 → F-07 → F-08 → F-09. Auth is sequential by nature; don't split it across agents.
-- **Highest-risk items:** F-01 (may invalidate the plan), F-15 (hardest to get right), F-03 (most security-sensitive).
+- **Highest-risk items:** F-15 (hardest to get right) and F-03 (most security-sensitive). F-01 was the highest-risk item and has now reported without invalidating the plan.

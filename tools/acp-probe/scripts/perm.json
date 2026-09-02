@@ -1,0 +1,5 @@
+[
+  {"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false}},"timeout":25000},
+  {"method":"session/new","params":{"cwd":"./ws","mcpServers":[]},"timeout":60000},
+  {"sleep":1000}
+]

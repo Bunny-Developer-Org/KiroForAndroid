@@ -1,0 +1,6 @@
+[
+  {"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false}},"timeout":25000},
+  {"method":"session/new","params":{"cwd":"./ws","mcpServers":[]},"timeout":60000},
+  {"method":"session/prompt","params":{"sessionId":"__SESSION__","prompt":[{"type":"text","text":"Run the shell command `id -un` and tell me the output. Use the shell tool."}]},"timeout":180000},
+  {"sleep":3000}
+]

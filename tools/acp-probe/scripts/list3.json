@@ -1,0 +1,5 @@
+[
+  {"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false}},"timeout":25000},
+  {"method":"session/list","params":{"_meta":{"kiro":{"sessionSource":"remote","listScope":"user"}}},"timeout":40000},
+  {"method":"session/list","params":{"_meta":{"kiro":{"sessionSource":"all","listScope":"both"}}},"timeout":40000}
+]

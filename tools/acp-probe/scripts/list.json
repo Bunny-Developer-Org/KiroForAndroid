@@ -1,0 +1,6 @@
+[
+  {"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false}},"timeout":25000},
+  {"method":"session/list","params":{},"timeout":25000},
+  {"method":"session/list","params":{"scope":"user"},"timeout":25000},
+  {"method":"_kiro/sourceProviders/list","params":{},"timeout":25000}
+]

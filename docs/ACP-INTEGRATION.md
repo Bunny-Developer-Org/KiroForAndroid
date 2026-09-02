@@ -2,7 +2,9 @@
 
 The contract the Android client implements. Written so the protocol layer can be built and unit-tested against a fake transport before the bridge exists.
 
-Source of truth for the documented parts: [Agent Client Protocol](https://kiro.dev/docs/cli/acp/) and [How Kiro works](https://kiro.dev/docs/how-kiro-works/). Anything this document adds beyond those pages is **our design** and is labelled as such.
+Source of truth: **[PROTOCOL-FINDINGS.md](PROTOCOL-FINDINGS.md)** — frames captured from `kiro-cli 2.19.2` (KAS 0.52.1) by the F-01 spike — then [Agent Client Protocol](https://kiro.dev/docs/cli/acp/) and [How Kiro works](https://kiro.dev/docs/how-kiro-works/) for the parts F-01 did not exercise. **Where the published docs and the captured frames disagree, the frames win**, and several sections below were rewritten on that basis. Anything this document adds beyond both is **our design** and is labelled as such.
+
+> **Before anything else: the agent must be started as `kiro-cli acp --agent-engine v3 --auth-method cli`.** The default engine is local-only and cannot see cloud sessions at all. See [PROTOCOL-FINDINGS §2](PROTOCOL-FINDINGS.md#2-the-one-thing-the-plan-missed-entirely---agent-engine-v3).
 
 ---
 
@@ -30,12 +32,17 @@ Three message kinds, and the client must handle all three directions:
 
 **Advertise `fs` and `terminal` as `false`.** This differs from the editor example in Kiro's docs, deliberately: in a cloud session the filesystem and shell live *in the sandbox*, and a phone has neither the user's checkout nor a terminal. Claiming those capabilities would invite the agent to route operations to a client that cannot service them.
 
-The agent's response carries `agentCapabilities`. Two matter:
+The agent's response carries `agentCapabilities`, and on the v3 engine a `_meta.kiro` block that is **the client's runtime configuration source**. Do not hard-code what it tells you:
 
 - `loadSession: true` — required for resuming a cloud session. If absent, resume is impossible and the app should say so rather than fail obscurely.
 - `promptCapabilities.image: true` — images may be attached to prompts. On a phone this is a genuinely differentiating feature (photograph a whiteboard, attach a screenshot of a failure), so it should not be treated as an afterthought.
+- `sessionCapabilities.list` — `session/list` is supported (see §3).
+- `_meta.kiro.extensionMethods[]` — the agent's **client→agent** extension methods, spelled out. Derive the namespace prefix from this array rather than matching a constant; the namespace is server-configurable. Note this list does **not** cover agent→client extension *notifications*, which are undocumented and open-ended (§5).
+- `_meta.kiro.sessionSources` / `sessionListScopes` / `executionTargets` — which stores, list breadths and placements this agent will serve. `executionTargets` containing `cloud-sandbox` is the runtime signal that cloud sessions are available; if it is absent, the app is talking to a local-only agent and should say so plainly.
 
 Store the negotiated `protocolVersion`; refuse to proceed on a major mismatch with a clear message.
+
+A verbatim handshake is committed at [`initialize-v3.jsonl`](../core/src/test/resources/fixtures/initialize-v3.jsonl).
 
 ---
 
@@ -43,50 +50,132 @@ Store the negotiated `protocolVersion`; refuse to proceed on a major mismatch wi
 
 | Operation | Method | Notes |
 |---|---|---|
-| Create | `session/new` | The editor example passes `cwd` and `mcpServers`. For a cloud session, repository binding is the meaningful input instead — how that is expressed is **unverified** (assumption A4 in ADR-001). Either the bridge creates via `kiro-cli --cloud --repo …` and we then `session/load`, or repos are attached via the `/repo` slash command through the commands extension. **F-01 must settle this.** |
-| Resume | `session/load` | By session ID. The path from "Web/Mobile session" to "CLI" is `kiro-cli --resume-id <id>`, so IDs are portable across surfaces. |
-| Prompt | `session/prompt` | `params.content` is an **array** of typed blocks (`{"type":"text","text":…}`), not a bare string. Images are additional blocks. |
+| List | `session/list` | Returns the session roster. **Cloud sessions require dispatch metadata** — see below. |
+| Create | `session/new` | Takes `cwd` and `mcpServers`; placement comes from dispatch metadata. |
+| Resume | `session/load` | By session ID, plus dispatch metadata naming the store. Replays the session's full history as `session/update` notifications. |
+| Prompt | `session/prompt` | `params.prompt` is an **array** of typed blocks (`{"type":"text","text":…}`), not a bare string. Images are additional blocks. Resolves with `{"stopReason": …}` when the turn ends. |
 | Cancel | `session/cancel` | Cancels the in-flight turn, not the session. |
 | Change model | `session/set_model` | |
-| Change agent/mode | `session/set_mode` | Maps to Kiro's agent configs |
+| Change agent/mode | `session/set_mode` | Maps to Kiro's agent configs. Available modes are returned by `session/new` as `modes.availableModes` — observed: `vibe` (Default), `spec`, `quick-spec`, `bug-fix`, `plan`, `autonomous`. |
 
-Repositories are fixed at creation time and branches cannot be selected at attach time; the documented workaround is to ask the agent to check out or create a branch once running. The UI should set that expectation rather than offering a branch picker that cannot work.
+### Dispatch metadata — how a call reaches the cloud
+
+This is the mechanism the plan was missing, and every cloud operation depends on it. Requests select their **store** and **placement** through `params._meta.kiro`:
+
+| Field | Values | Applies to |
+|---|---|---|
+| `sessionSource` | `"local"` · `"remote"` · `"all"` | any; `"all"` only on `session/list` |
+| `listScope` | `"workspace"` · `"user"` · `"both"` | `session/list`; non-`workspace` requires the agent to advertise it |
+| `executionTarget` | `{"kind":"local"}` · `{"kind":"cloud-sandbox"}` | `session/new` |
+
+```jsonc
+// the cloud roster
+{"method":"session/list","params":{"_meta":{"kiro":{"sessionSource":"remote","listScope":"user"}}}}
+
+// attach to a cloud session
+{"method":"session/load","params":{"sessionId":"…","cwd":"…","mcpServers":[],
+  "_meta":{"kiro":{"sessionSource":"remote"}}}}
+
+// create one
+{"method":"session/new","params":{"cwd":"…","mcpServers":[],
+  "_meta":{"kiro":{"executionTarget":{"kind":"cloud-sandbox"}}}}}
+```
+
+Two rules the agent enforces, both as `InvalidParamsError`:
+
+- **The union is closed.** An unrecognised `sessionSource`, `listScope` or `executionTarget` is an error, never a silent fallback to the default. Send only values the handshake advertised.
+- **`sessionSource` and `executionTarget` are two spellings of one decision.** Naming both with values that disagree is rejected. Send one.
+
+Omitting the metadata entirely means `sessionSource: "local"` — which is why a naive client sees only local sessions and concludes cloud is unreachable.
+
+### Session records
+
+A listed session carries two independent statuses, and the UI must keep them distinct:
+
+- `_meta.kiro.status` — `idle` / `in_progress`: is the **agent** working?
+- `_meta.kiro.instanceStatus` — e.g. `suspended`: is the **sandbox VM** up?
+
+Also present: `repositories[]` (`providerType`, `name`, `url`), `executionTarget`, `agentMode`, `createdAt`.
+
+### Repositories
+
+Bound at creation from a first-class catalog, not a flag or a slash command:
+
+- `_kiro/sourceProviders/list` → providers with `connectionStatus` (`connected` / `not_connected`)
+- `_kiro/sourceProviders/listResources` `{providerType}` → repos with `name`, `url`, `visibility`, `defaultBranch`
+
+Repositories are fixed at creation time and branches cannot be selected at attach time; the documented workaround is to ask the agent to check out or create a branch once running. Show `defaultBranch` as information; do not offer a branch picker that cannot work.
 
 ---
 
 ## 4. Streaming updates
 
-Delivered as `session/notification` notifications:
+Delivered as **`session/update`** notifications — not `session/notification` — discriminated by `params.update.sessionUpdate`. The kinds are `snake_case`, and there are seven, not the four the ACP page lists:
 
 | Kind | Meaning | Client handling |
 |---|---|---|
-| `AgentMessageChunk` | Incremental agent output | Append to the in-flight message. **Coalesce** on a ~60–100 ms tick; never recompose per chunk. |
-| `ToolCall` | A tool invocation begins (name, params, status) | Insert a collapsible transcript entry |
-| `ToolCallUpdate` | Progress on a running tool | Update in place, keyed by tool-call id |
-| `TurnEnd` | Turn complete | Seal the in-flight message; stop the "working" indicator; release any wake lock |
+| `agent_message_chunk` | Incremental agent output | Append to the in-flight message. **Coalesce** on a ~60–100 ms tick; never recompose per chunk. `_meta.kiro.replayId` groups the chunks of one message. |
+| `user_message_chunk` | The user's own turns | Mostly seen during replay |
+| `tool_call` | A tool invocation begins | Insert a collapsible entry. Carries `toolCallId`, `title`, `kind` (`execute`, `other`, …), `status`, `rawInput` |
+| `tool_call_update` | Progress or result | Update in place, keyed by `toolCallId`. Carries `status` and `content[]` |
+| `session_info_update` | **Everything else** — see below | Discriminate on `_meta.kiro.kind` |
+| `config_option_update` | Mode/model pickers with current value and options | Drives the session settings UI |
+| `available_commands_update` | Slash commands, including steering documents | Drives composer autocomplete |
 
-Rendering strategy is fixed by [ADR-003 §3](adr/ADR-003-tech-stack.md#3-two-conventions-that-are-load-bearing): the in-flight message renders **outside** the lazy list and is appended to it only at `TurnEnd`. Highlighting recomputed per token on a growing string is the specific failure mode to avoid.
+### `session_info_update` is the workhorse
 
-An unknown update kind must render as a generic entry, never crash. `TurnEnd` may be missed if the socket drops mid-turn — treat turn completion as recoverable via reconnect state, not as a guaranteed event.
+Turn boundaries and session state do **not** have their own update kinds. **There is no `TurnEnd`.** They arrive here, keyed by `_meta.kiro.kind`:
+
+| `kind` | Meaning |
+|---|---|
+| `turn_start` | Turn begins — start the working indicator |
+| `turn_end` | Turn complete, with `stopReason` (e.g. `end_turn`). Mirrored by the `session/prompt` response |
+| `context_usage` | Percentage plus a token breakdown by category |
+| `focus_update` | The agent retitling the session mid-turn |
+| `user_message_id_assigned` | Correlates a sent prompt with its server-side id |
+| `pendingInteraction` | **An approval is outstanding** — render the waiting state |
+| `interactionResolved` | It was answered, and with which option — clear the state even when *another* client answered |
+| `promptTurnSummaries` | Per-turn credit spend and tools used (F-19b) |
+| `displayError` | A user-facing error delivered in-band, e.g. an MCP server needing authorization |
+
+Rendering strategy is fixed by [ADR-003 §3](adr/ADR-003-tech-stack.md#3-two-conventions-that-are-load-bearing): the in-flight message renders **outside** the lazy list and is appended to it only at turn end. Highlighting recomputed per token on a growing string is the specific failure mode to avoid.
+
+An unknown update kind — or an unknown `_meta.kiro.kind` — must render as a generic entry, never crash. `turn_end` may be missed if the socket drops mid-turn, so treat turn completion as recoverable via reconnect state, not as a guaranteed event.
+
+**Replay volume is not a tail case.** A single `session/load` on a real cloud session replayed **991 updates**. Fixture: [`session-load-remote-head.jsonl`](../core/src/test/resources/fixtures/session-load-remote-head.jsonl).
 
 ---
 
 ## 5. Kiro extensions
 
-Namespaced per the ACP spec and **documented as experimental and subject to change**. Optional by design — a client may ignore them.
+Namespaced `_kiro/` and **documented as experimental and subject to change**. Optional by design — a client may ignore them. **Derive the prefix from `initialize`** rather than hard-coding it; the namespace is server-configurable.
 
-| Method | Type | Use here |
-|---|---|---|
-| `commands/execute` | request | Run a slash command — notably `/repo` for repository attachment |
-| `commands/options` | request | Autocomplete for a partial command |
-| `commands/available` | notification | Sent after session creation; drives which commands the UI offers |
-| `mcp/oauth_request` | notification | Carries an OAuth URL when an MCP server needs auth — open in a Custom Tab, same as sign-in |
-| `mcp/server_initialized` | notification | MCP tools now available |
-| `compaction/status` | notification | Show a "compacting context" indicator instead of an unexplained stall |
-| `clear/status` | notification | Progress while clearing history |
-| `_session/terminate` | notification | Subagent session ended |
+### Client → agent (enumerated by the handshake)
 
-**Prefix is unresolved.** The ACP page uses `_kiro.dev/`; How Kiro works says `_kiro/`. Do not hard-code one: match on the method suffix, accept either prefix, and record what the live server actually sends (ADR-001 assumption A3).
+The handshake's `_meta.kiro.extensionMethods` array is authoritative. The ones this app needs:
+
+| Method | Use here |
+|---|---|
+| `_kiro/sourceProviders/list` | Providers and their connection status — the repo picker's first screen |
+| `_kiro/sourceProviders/listResources` | The user's repositories, with visibility and default branch |
+| `_kiro/session/history` · `/compact` · `/export` · `/context` | Transcript and context management |
+
+Also advertised, and out of scope for now: `_kiro/knowledge`, `_kiro/codeIntelligence`, `_kiro/config/template`, and fourteen `_kiro/workflow/*` methods.
+
+### Agent → client (undocumented, and **not** in `extensionMethods`)
+
+`extensionMethods` covers only the client→agent direction. These notifications were observed live and appear in no published list — which is exactly why §8's tolerance requirement is load-bearing:
+
+| Notification | Use here |
+|---|---|
+| `_kiro/sessions/changed` | Roster upserts/deletes with status transitions — **drives a live session list without polling** |
+| `_kiro/mcp/status` | Per-server state; carries `authorizationUrl` and `failedAuthorization` when a server needs OAuth — open in a Custom Tab, same pattern as sign-in |
+| `_kiro/governance/state` | Enterprise flags and feature gates |
+| `_kiro/tools/didChange` | Available tool tags |
+| `_kiro/steering/documents_changed` | Steering documents, which surface as slash commands |
+| `_kiro/powers/items_changed` · `_kiro/progressive_context/items_changed` · `_kiro/customAgent/config_error` | Observed; not needed yet |
+
+Treat this list as incomplete. It is a snapshot of one CLI version, not a contract.
 
 Everything here is an enhancement. The app must remain fully usable if every extension is absent — that is what makes protocol drift survivable.
 
@@ -96,16 +185,45 @@ Everything here is an enhancement. The app must remain fully usable if every ext
 
 Approvals are the feature that makes a phone client worth having: the agent blocks, and the user unblocks it from wherever they are. Kiro documents that a request raised while no client is attached **waits and is presented to the next client that attaches**, which implies it is durable session state rather than a transient event.
 
+F-01 confirmed this is a real code path, not just documented intent: KAS re-sends outstanding permission requests to a client that attaches later.
+
+The agent sends a server-initiated request; the client answers with a plain JSON-RPC response:
+
+```jsonc
+// agent -> client
+{"jsonrpc":"2.0","id":1,"method":"session/request_permission",
+ "params":{"sessionId":"…",
+   "toolCall":{"toolCallId":"run_command_…","status":"pending","title":"id -un"},
+   "options":[{"optionId":"accept","name":"Allow","kind":"allow_once"},
+              {"optionId":"always-accept","name":"Always allow","kind":"allow_always"},
+              {"optionId":"reject","name":"Deny","kind":"reject_once"},
+              {"optionId":"always-reject","name":"Always deny","kind":"reject_always"}],
+   "_meta":{"kiro":{"toolId":"run_command","command":"id -un",
+     "consent":{"capability":"shell","resource":"id -un","askType":"implicit","workspaceRoot":"…"},
+     "consentRound":1}}}}
+
+// client -> agent
+{"jsonrpc":"2.0","id":1,"result":{"outcome":{"outcome":"selected","optionId":"reject"}}}
+```
+
 Design requirements:
 
-- Answer via the reply channel for an agent-initiated request; do not invent a side channel.
-- On attach, **check for a pending approval immediately** and surface it before the transcript finishes replaying.
+- **Render `options[]` as sent**, keyed by `kind`. The four above are what 2.19.2 offers; the list is agent-supplied and must not be hard-coded.
+- `_meta.kiro.consent` gives the capability, the concrete resource, and whether the ask was implicit — enough for a notification to be readable without opening the session.
+- On attach, **check for a pending approval immediately** and surface it before the transcript finishes replaying. `pendingInteraction` / `interactionResolved` (§4) also carry this in-stream, including when another client answers first.
 - Deliver via notification with inline allow/deny actions (F-16).
-- The exact method name and payload shape are **unverified** (ADR-001 assumption A5) — F-01 must capture a real one.
+- **Answering does not require the connection that asked.** KAS correlates by `toolCallId` via `_kiro/permission/respond` `{toolCallId, optionId, sessionId?}` — which is precisely the mobile case: a notification arrives, the socket has since dropped, the user taps Allow on a fresh one.
+- **There is a second channel: `_kiro/userInput`.** The agent can ask a free-text question mid-turn, answered with `_kiro/userInput/respond` `{toolCallId, action: "answered"|"dismissed", answer?}`. Undocumented, and it needs its own UI.
+
+Fixture: [`prompt-turn-with-permission.jsonl`](../core/src/test/resources/fixtures/prompt-turn-with-permission.jsonl).
+
+**Verified on a local session only.** The cloud path follows from the same relay and re-send machinery, but has not been observed — F-03 confirms it on its first cloud turn.
 
 ---
 
 ## 7. Reconnect and replay — our design, not Kiro's
+
+> **Re-open this before implementing it.** F-01 found that every update already carries `_meta.kiro.messageId` and `timestamp`, that `session/load` replays history in order, and that KAS itself multiplexes clients and re-sends pending permissions. The scheme below was designed without knowing any of that, and may be redundant. F-03 decides — resume-by-`messageId` first, this only if that proves insufficient — and records which way it went.
 
 ACP does not document a resume-from-cursor mechanism, and a mobile client drops its socket constantly (backgrounding, network changes, Doze). So the bridge owns durability. The CLI already persists sessions as `<id>.json` plus a `<id>.jsonl` event log, which is the natural backing store.
 
@@ -136,5 +254,5 @@ These control messages are **bridge-specific, not ACP**. Namespace them (e.g. `_
 The protocol layer lives in `core/` with no Android dependencies (ADR-003 §2), so:
 
 - `AcpTransport` is an interface; tests use an in-memory fake and assert on the frames produced.
-- Capture **real** frame sequences during the F-01 spike and commit them as golden JSONL fixtures. The `TranscriptReducer` is then tested by replaying a fixture and asserting the resulting transcript — including the awkward cases: interleaved tool calls, a mid-turn disconnect, a permission request arriving during streaming.
+- **The fixtures exist.** F-01 committed five under [`core/src/test/resources/fixtures/`](../core/src/test/resources/fixtures/), covering the handshake, cloud session listing, the repository catalog, a cloud attach with replay, and a complete turn including a permission request. The `TranscriptReducer` is tested by replaying one and asserting the resulting transcript — including the awkward cases: interleaved tool calls, a mid-turn disconnect, a permission request arriving during streaming.
 - Every fixture is a regression test against protocol drift. If Kiro changes something, a fixture-based test tells you what and where.

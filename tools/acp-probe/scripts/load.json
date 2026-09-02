@@ -1,0 +1,5 @@
+[
+  {"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false}},"timeout":25000},
+  {"method":"session/load","params":{"sessionId":"<a cloud sessionId from session/list>","cwd":".","mcpServers":[],"_meta":{"kiro":{"sessionSource":"remote"}}},"timeout":180000},
+  {"sleep":15000}
+]

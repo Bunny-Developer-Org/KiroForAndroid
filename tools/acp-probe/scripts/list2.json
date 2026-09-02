@@ -1,0 +1,8 @@
+[
+  {"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false}},"timeout":25000},
+  {"method":"_kiro/sourceProviders/listResources","params":{"providerType":"GITHUB"},"timeout":30000},
+  {"method":"session/list","params":{"source":"remote"},"timeout":25000},
+  {"method":"session/list","params":{"sources":["remote"]},"timeout":25000},
+  {"method":"session/list","params":{"_meta":{"kiro":{"source":"remote"}}},"timeout":25000},
+  {"method":"session/list","params":{"scope":"user","executionTarget":{"kind":"cloud-sandbox"}},"timeout":25000}
+]

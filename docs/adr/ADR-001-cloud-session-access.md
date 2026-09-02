@@ -1,7 +1,7 @@
 # ADR-001: How the app reaches Kiro cloud sessions
 
-- **Status:** Proposed — blocks every other work item
-- **Date:** 2026-09
+- **Status:** Accepted — the six assumptions in §5 were verified against a real `kiro-cli` by [F-01](../FEATURES.md#f-01--protocol-spike-verify-assumptions-capture-golden-fixtures) on 2026-09-02. The decision stands; see [PROTOCOL-FINDINGS.md](../PROTOCOL-FINDINGS.md) for what changed underneath it.
+- **Date:** 2026-09 (assumptions resolved 2026-09-02)
 - **Scope:** The transport and trust topology between the Android app and Kiro cloud sessions. Does not decide UI or runtime (see ADR-002, ADR-003).
 
 ---
@@ -20,7 +20,7 @@ Research into Kiro's public documentation produced a clear and uncomfortable ans
 | Every surface talks to the same agent harness over the **Agent Client Protocol** (ACP), which is JSON-RPC 2.0 | [How Kiro works](https://kiro.dev/docs/how-kiro-works/) |
 | Local clients connect over **stdio**; **Web and Mobile connect to a sandboxed harness over WebSocket** | [How Kiro works](https://kiro.dev/docs/how-kiro-works/) |
 | ACP methods the harness implements: `initialize`, `session/new`, `session/load`, `session/prompt`, `session/cancel`, `session/set_mode`, `session/set_model` | [ACP](https://kiro.dev/docs/cli/acp/) |
-| Streaming update kinds: `AgentMessageChunk`, `ToolCall`, `ToolCallUpdate`, `TurnEnd` | [ACP](https://kiro.dev/docs/cli/acp/) |
+| Streaming update kinds: `AgentMessageChunk`, `ToolCall`, `ToolCallUpdate`, `TurnEnd` — *this list is incomplete and the spellings are wrong; see [PROTOCOL-FINDINGS §5](../PROTOCOL-FINDINGS.md#5-corrections-to-the-documented-protocol)* | [ACP](https://kiro.dev/docs/cli/acp/) |
 | Kiro-specific extensions are namespaced (slash commands, MCP OAuth, compaction status) and marked **experimental and subject to change** | [ACP](https://kiro.dev/docs/cli/acp/) |
 | The CLI creates cloud sessions with `kiro-cli --cloud [--repo owner/repo,...]`, and manages them with `chat --list-sessions`, `--resume-id`, `--delete-session` | [Cloud sessions](https://kiro.dev/docs/cloud-sessions/), [CLI commands](https://kiro.dev/docs/reference/cli-commands/) |
 | `kiro-cli acp` exposes the whole agent as an ACP agent over stdio, JSON-RPC 2.0 | [ACP](https://kiro.dev/docs/cli/acp/) |
@@ -35,7 +35,7 @@ Research into Kiro's public documentation produced a clear and uncomfortable ans
 - **The CLI is not open source.** `kirodotdev/Kiro` is an issue tracker, not source. (`KiroCrew` is open source but is a different product.) So the protocol cannot be learned by reading the client.
 - **Extensions are explicitly unstable.** The docs warn the `_kiro` extension methods may change without notice.
 
-There is also a **documentation inconsistency worth resolving before implementation**: [How Kiro works](https://kiro.dev/docs/how-kiro-works/) describes the extension namespace as `_kiro/`, while [the ACP page](https://kiro.dev/docs/cli/acp/) uses `_kiro.dev/`. Both cannot be right. Treat the exact prefix as **unverified** and discover it at runtime (see F-01).
+There is also a **documentation inconsistency**: [How Kiro works](https://kiro.dev/docs/how-kiro-works/) describes the extension namespace as `_kiro/`, while [the ACP page](https://kiro.dev/docs/cli/acp/) uses `_kiro.dev/`. F-01 settled it — the live prefix is **`_kiro/`** — but the client should still derive it from the `initialize` handshake, which enumerates the agent's extension methods, rather than hard-code either spelling.
 
 ### Consequence
 
@@ -59,7 +59,7 @@ Reverse-engineer the Web/iOS client's endpoint, auth, and framing; speak it from
 
 The user runs a small bridge process on a machine they control (home server, workstation, cheap VPS) where `kiro-cli` is installed and signed in. The bridge:
 
-1. spawns `kiro-cli acp` (documented: ACP agent, JSON-RPC 2.0 over stdio), and/or drives `kiro-cli --cloud --repo …` to create cloud sessions;
+1. spawns `kiro-cli acp --agent-engine v3 --auth-method cli` (documented: ACP agent, JSON-RPC 2.0 over stdio) and creates cloud sessions in-protocol — F-01 confirmed the `--cloud`/`--resume-id` shell-out is not needed;
 2. exposes that JSON-RPC stream over an authenticated WebSocket;
 3. the Android app is an ACP **client** on the other end.
 
@@ -140,20 +140,22 @@ The alternative — a phone-only app built on a guessed private API — buys rea
 
 ---
 
-## 5. Assumptions to verify before F-03 starts
+## 5. Assumptions — **resolved by F-01 on 2026-09-02**
 
-These are load-bearing and currently **unverified**. Each is cheap to check against a real `kiro-cli` install, and each is a genuine risk to the plan.
+These were load-bearing and unverified when this ADR was written. They have since been checked against a real `kiro-cli 2.19.2` install (KAS 0.52.1). Full report, captured frames and implications: [PROTOCOL-FINDINGS.md](../PROTOCOL-FINDINGS.md).
 
-| # | Assumption | Risk if wrong |
+| # | Assumption | Verdict |
 |---|---|---|
-| A1 | `kiro-cli acp` can attach to a **cloud** session, not only local ones | High — the bridge would have to drive the interactive TUI instead, which is far worse. Mitigation: bridge creates sessions via `--cloud` and attaches via `--resume-id`. |
-| A2 | A cloud session created by `--cloud` is reachable through the ACP `session/load` method by ID | High — same as A1. |
-| A3 | The `_kiro` extension prefix is `_kiro.dev/` (per the ACP page) rather than `_kiro/` (per How Kiro works) | Low — discoverable at runtime; handle both. |
-| A4 | Repository selection is reachable programmatically (via `--repo` at creation, or the `/repo` slash command through `_kiro…/commands/execute`) | Medium — the repo picker is core to session creation. |
-| A5 | Permission/approval requests arrive as server-initiated ACP requests the client can answer | High — approvals are a headline feature. Docs say a waiting request is presented to the next client that attaches, which implies yes. |
-| A6 | `kiro-cli login --use-device-flow` can be driven non-interactively enough to scrape the verification URI and code | Medium — otherwise sign-in is a one-time manual step on the bridge host, which is acceptable but worse UX. |
+| A1 | `kiro-cli acp` can attach to a **cloud** session, not only local ones | **Verified.** `session/load` on a `cloud-sandbox` session succeeded and replayed 991 updates. The `--resume-id` fallback is not needed. |
+| A2 | A cloud session is reachable through `session/load` by ID | **Verified.** Store and placement are selected per-request via `params._meta.kiro.{sessionSource, listScope, executionTarget}`. Cloud sessions are also *listable* over ACP, with repositories and status. |
+| A3 | The extension prefix is `_kiro.dev/` rather than `_kiro/` | **Refuted, harmlessly.** It is `_kiro/`; the ACP docs page is wrong. Better: `initialize` enumerates the agent's extension methods, so the client should derive the prefix rather than hard-code either spelling. |
+| A4 | Repository selection is reachable programmatically | **Verified, and better than assumed.** `_kiro/sourceProviders/list` and `/listResources` return a full repo catalog with visibility and default branch — no `--repo` flag or slash command needed. |
+| A5 | Permission requests arrive as answerable server-initiated ACP requests | **Verified on a local session.** `session/request_permission` carries the options and a `_meta.kiro.consent` description; a plain JSON-RPC response resolves it. **Not yet observed on a cloud session** — F-03 must confirm on its first cloud turn. |
+| A6 | `login --use-device-flow` can be driven non-interactively | **Partially refuted.** The verification URI and user code *are* printed parseably, but the CLI first shows an interactive provider-picker TUI with no flag to preselect. The bridge must drive it over a **pty**, and provider choice moves into the app. `login` also refuses while signed in, so re-auth needs an explicit `logout`. |
 
-**F-01 is a spike whose only job is to answer A1–A6.** Nothing downstream should be estimated until it reports.
+**One correction that is not an assumption, and matters more than any of them:** the default `kiro-cli acp` engine cannot reach cloud sessions at all. Every client must pass `--agent-engine v3 --auth-method cli`. See PROTOCOL-FINDINGS §2.
+
+**A second:** much of what §3's topology assumed the bridge would build — WebSocket ACP transport, multi-client multiplexing, permission correlation across reconnects, pending-permission re-send on attach — already exists inside KAS. F-03's scope shrinks accordingly. See PROTOCOL-FINDINGS §4.
 
 ---
 
