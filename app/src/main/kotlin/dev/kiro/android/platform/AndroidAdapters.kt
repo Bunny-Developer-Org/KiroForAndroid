@@ -13,6 +13,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import dev.kiro.core.acp.AcpJson
 import dev.kiro.core.auth.BridgeRegistry
 import dev.kiro.core.auth.PairedBridge
+import dev.kiro.core.session.RecentRepo
+import dev.kiro.core.session.RecentRepoStore
 import dev.kiro.core.util.DriftMetrics
 import dev.kiro.core.util.Logger
 import kotlinx.coroutines.flow.Flow
@@ -20,6 +22,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -27,6 +30,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 private val Context.bridgeDataStore: DataStore<Preferences> by preferencesDataStore("kiro_bridges")
 private val Context.pinnedSessionsDataStore: DataStore<Preferences> by preferencesDataStore("kiro_pinned_sessions")
+private val Context.recentReposDataStore: DataStore<Preferences> by preferencesDataStore("kiro_recent_repos")
 
 class AndroidLogger(private val tag: String = "Kiro") : Logger {
     override fun debug(message: String) { Log.d(tag, message) }
@@ -204,5 +208,67 @@ class DataStorePinnedSessionStore(private val context: Context) : PinnedSessionS
             val current = prefs[key] ?: emptySet()
             prefs[key] = if (sessionId in current) current - sessionId else current + sessionId
         }
+    }
+}
+
+/**
+ * Locally persisted "recently used" repositories (ADR-004 §5 layer (b)).
+ *
+ * Same shape as [DataStoreBridgeRegistry]: one [StringStore] slot holding a
+ * JSON array, kept small (capped at [MAX_ENTRIES], sorted most-recent-first)
+ * so `merge` never grows this file unbounded across a long-lived install.
+ */
+class DataStoreRecentRepoStore(private val stringStore: StringStore) : RecentRepoStore {
+
+    constructor(context: Context) : this(
+        DataStorePreferenceStringStore(context.recentReposDataStore, stringPreferencesKey("recent_repos")),
+    )
+
+    override suspend fun read(): List<RecentRepo> {
+        val raw = stringStore.read() ?: return emptyList()
+        val array = runCatching { AcpJson.parseToJsonElement(raw) as? JsonArray }.getOrNull()
+            ?: return emptyList()
+        return array.mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            RecentRepo(
+                slug = obj.stringValue("slug") ?: return@mapNotNull null,
+                providerType = obj.stringValue("providerType"),
+                lastUsedMillis = obj.stringValue("lastUsedMillis")?.toLongOrNull()
+                    ?: return@mapNotNull null,
+            )
+        }
+    }
+
+    /** Upserts by slug, keeping the newer entry, then caps and re-sorts. */
+    override suspend fun merge(repos: List<RecentRepo>) {
+        if (repos.isEmpty()) return
+        val merged = (repos + read())
+            .groupBy { it.slug }
+            .map { (_, entries) -> entries.maxBy { it.lastUsedMillis } }
+            .sortedByDescending { it.lastUsedMillis }
+            .take(MAX_ENTRIES)
+        write(merged)
+    }
+
+    private suspend fun write(repos: List<RecentRepo>) {
+        val encoded = buildJsonArray {
+            repos.forEach { repo ->
+                add(
+                    buildJsonObject {
+                        put("slug", repo.slug)
+                        repo.providerType?.let { put("providerType", it) }
+                        put("lastUsedMillis", repo.lastUsedMillis.toString())
+                    },
+                )
+            }
+        }.toString()
+        stringStore.write(encoded)
+    }
+
+    private fun JsonObject.stringValue(name: String): String? =
+        (this[name] as? JsonPrimitive)?.takeIf { it.isString }?.content
+
+    private companion object {
+        const val MAX_ENTRIES = 12
     }
 }

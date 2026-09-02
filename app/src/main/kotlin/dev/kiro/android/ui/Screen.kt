@@ -13,6 +13,14 @@ import dev.kiro.core.model.CloudSession
  */
 sealed interface Screen {
     data object Sessions : Screen
-    data object Create : Screen
+
+    /**
+     * [prefillRepos] is how "New session in this repo" works from the transcript
+     * header (F-11/ADR-004 §5): repositories cannot be added to a *running*
+     * session, so the only "switch" is starting a fresh one pre-seeded with the
+     * old session's repos rather than presenting a set that looks editable.
+     */
+    data class Create(val prefillRepos: List<String> = emptyList()) : Screen
+
     data class Transcript(val session: CloudSession) : Screen
 }

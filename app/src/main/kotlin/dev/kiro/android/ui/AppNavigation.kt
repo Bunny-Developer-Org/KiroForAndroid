@@ -11,7 +11,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -19,24 +18,21 @@ import androidx.compose.ui.unit.dp
 import dev.kiro.android.ServiceLocator
 import dev.kiro.android.service.SessionConnectionService
 import dev.kiro.android.ui.create.CreateSessionScreen
+import dev.kiro.android.ui.create.CreateSessionViewModel
 import dev.kiro.android.ui.sessions.SessionListScreen
 import dev.kiro.android.ui.sessions.SessionListViewModel
 import dev.kiro.android.ui.theme.KiroLayout
 import dev.kiro.android.ui.transcript.ApprovalCard
 import dev.kiro.android.ui.transcript.Composer
+import dev.kiro.android.ui.transcript.TranscriptHeader
 import dev.kiro.android.ui.transcript.TranscriptScreen
 import dev.kiro.android.ui.transcript.TranscriptViewModel
 import dev.kiro.android.ui.transcript.UserInputCard
 import dev.kiro.core.model.AgentMode
 import dev.kiro.core.model.CloudSession
-import dev.kiro.core.model.RepoCandidate
-import dev.kiro.core.model.SourceProvider
 import dev.kiro.core.session.CloudSessionGateway
 import dev.kiro.core.session.ConnectionState
-import dev.kiro.core.session.CreateSessionRequest
-import dev.kiro.core.session.NotEntitledException
-import dev.kiro.core.session.SessionLimitReachedException
-import kotlinx.coroutines.launch
+import dev.kiro.core.session.GatewayRepoCatalog
 
 @Composable
 fun AppNavigation(
@@ -61,13 +57,13 @@ fun AppNavigation(
             pinnedIds = pinnedIds,
             connection = connection,
             onOpen = { screen = Screen.Transcript(it) },
-            onNewSession = { screen = Screen.Create },
+            onNewSession = { screen = Screen.Create() },
             onDelete = { sessionListViewModel.delete(it.id) },
             onTogglePin = { sessionListViewModel.togglePin(it.id) },
             onManageBridges = onManageBridges,
         )
 
-        Screen.Create -> CreateScreenHost(gateway) { created ->
+        is Screen.Create -> CreateScreenHost(gateway, current.prefillRepos) { created ->
             sessionListViewModel.addCreated(created)
             screen = Screen.Transcript(created)
         }
@@ -77,6 +73,9 @@ fun AppNavigation(
             session = current.session,
             supportsImages = (connection as? ConnectionState.Connected)?.supportsImages ?: false,
             onBack = { screen = Screen.Sessions },
+            onNewSessionInRepo = {
+                screen = Screen.Create(current.session.repositories.map { it.name })
+            },
         )
     }
 }
@@ -86,7 +85,8 @@ private fun TranscriptHost(
     gateway: CloudSessionGateway,
     session: CloudSession,
     supportsImages: Boolean,
-    @Suppress("UNUSED_PARAMETER") onBack: () -> Unit,
+    onBack: () -> Unit,
+    onNewSessionInRepo: () -> Unit,
 ) {
     val context = LocalContext.current
     val viewModel = remember(session.id) { TranscriptViewModel(gateway, session.id) }
@@ -103,6 +103,8 @@ private fun TranscriptHost(
     }
 
     Column(Modifier.fillMaxSize()) {
+        TranscriptHeader(session = session, onBack = onBack, onNewSessionInRepo = onNewSessionInRepo)
+
         Box(Modifier.weight(1f)) {
             TranscriptScreen(state, Modifier.fillMaxSize())
         }
@@ -150,59 +152,33 @@ private fun TranscriptHost(
 @Composable
 private fun CreateScreenHost(
     gateway: CloudSessionGateway,
+    prefillRepos: List<String>,
     onCreated: (CloudSession) -> Unit,
 ) {
-    val scope = rememberCoroutineScope()
-    var providers by remember { mutableStateOf<List<SourceProvider>>(emptyList()) }
-    var repositories by remember { mutableStateOf<List<RepoCandidate>>(emptyList()) }
-    var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(gateway) {
-        providers = runCatching { gateway.listSourceProviders() }.getOrDefault(emptyList())
-        repositories = providers
-            .filter { it.connectionStatus == SourceProvider.ConnectionStatus.CONNECTED }
-            .flatMap { provider ->
-                runCatching { gateway.listRepositories(provider.providerType) }
-                    .getOrDefault(emptyList())
-            }
+    val viewModel = remember(gateway, prefillRepos) {
+        CreateSessionViewModel(
+            gateway,
+            GatewayRepoCatalog(gateway, ServiceLocator.recentRepos, ServiceLocator.logger),
+            prefillRepos,
+        )
     }
+    val state by viewModel.state.collectAsState()
 
     CreateSessionScreen(
-        providers = providers,
-        repositories = repositories,
+        state = state,
         modes = DEFAULT_MODES,
-        busy = busy,
-        errorMessage = error,
         onConnectProvider = {
             // Kiro owns provider connection; we send the user there in a Custom
             // Tab rather than pretending to do it here.
             ServiceLocator.browser.open("https://app.kiro.dev/settings")
         },
-        onCreate = { repos, prompt, mode ->
-            busy = true
-            error = null
-            scope.launch {
-                runCatching {
-                    gateway.createSession(CreateSessionRequest(repos, prompt, mode))
-                }.onSuccess { created ->
-                    gateway.prompt(
-                        created.id,
-                        listOf(dev.kiro.core.session.PromptBlock.Text(prompt)),
-                    )
-                    onCreated(created)
-                }.onFailure { failure ->
-                    // Each of these has a different thing the user can do about it,
-                    // so each gets its own sentence rather than a generic failure.
-                    error = when (failure) {
-                        is NotEntitledException -> failure.message
-                        is SessionLimitReachedException -> failure.message
-                        else -> "Could not start the session: ${failure.message}"
-                    }
-                }
-                busy = false
-            }
-        },
+        onSetQuery = viewModel::setQuery,
+        onSetManualEntry = viewModel::setManualEntry,
+        onAddManual = viewModel::addManual,
+        onToggle = viewModel::toggle,
+        onRemove = viewModel::remove,
+        onRetryCatalog = viewModel::retryCatalog,
+        onCreate = { prompt, modeId -> viewModel.create(prompt, modeId, onCreated) },
     )
 }
 

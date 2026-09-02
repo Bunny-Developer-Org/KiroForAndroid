@@ -5,6 +5,7 @@ import dev.kiro.android.platform.AndroidLogger
 import dev.kiro.android.platform.CustomTabBrowserLauncher
 import dev.kiro.android.platform.DataStoreBridgeRegistry
 import dev.kiro.android.platform.DataStorePinnedSessionStore
+import dev.kiro.android.platform.DataStoreRecentRepoStore
 import dev.kiro.android.platform.InMemoryDriftMetrics
 import dev.kiro.android.platform.KeystoreTokenStore
 import dev.kiro.android.platform.PinnedSessionStore
@@ -16,6 +17,7 @@ import dev.kiro.core.auth.TokenStore
 import dev.kiro.core.session.BridgeGateway
 import dev.kiro.core.session.CloudSessionGateway
 import dev.kiro.core.session.FakeGateway
+import dev.kiro.core.session.RecentRepoStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -41,6 +43,7 @@ object ServiceLocator {
     val tokenStore: TokenStore by lazy { KeystoreTokenStore(appContext) }
     val bridges: BridgeRegistry by lazy { DataStoreBridgeRegistry(appContext) }
     val pinnedSessions: PinnedSessionStore by lazy { DataStorePinnedSessionStore(appContext) }
+    val recentRepos: RecentRepoStore by lazy { DataStoreRecentRepoStore(appContext) }
     val browser by lazy { CustomTabBrowserLauncher(appContext) }
     val connectivityObserver by lazy { ConnectivityObserver(appContext) }
 
