@@ -57,7 +57,7 @@ Reverse-engineer the Web/iOS client's endpoint, auth, and framing; speak it from
 
 ### Option B — Self-hosted ACP bridge fronting `kiro-cli`
 
-The user runs a small bridge process on a machine they control (home server, workstation, cheap VPS) where `kiro-cli` is installed and signed in. The bridge:
+The user runs a small bridge process on a machine they control (home server, workstation, cheap VPS) where `kiro-cli` is installed and signed in. It does **not** need a checkout of the user's code or any git credentials — see [ADR-004 §2](ADR-004-work-repo-selection.md#2-what-we-found-how-kiro-cli-actually-selects-the-work-repo) — and where it should run is decided in [ADR-005](ADR-005-bridge-hosting-and-availability.md). The bridge:
 
 1. spawns `kiro-cli acp` (documented: ACP agent, JSON-RPC 2.0 over stdio), and/or drives `kiro-cli --cloud --repo …` to create cloud sessions;
 2. exposes that JSON-RPC stream over an authenticated WebSocket;
@@ -149,11 +149,13 @@ These are load-bearing and currently **unverified**. Each is cheap to check agai
 | A1 | `kiro-cli acp` can attach to a **cloud** session, not only local ones | High — the bridge would have to drive the interactive TUI instead, which is far worse. Mitigation: bridge creates sessions via `--cloud` and attaches via `--resume-id`. |
 | A2 | A cloud session created by `--cloud` is reachable through the ACP `session/load` method by ID | High — same as A1. |
 | A3 | The `_kiro` extension prefix is `_kiro.dev/` (per the ACP page) rather than `_kiro/` (per How Kiro works) | Low — discoverable at runtime; handle both. |
-| A4 | Repository selection is reachable programmatically (via `--repo` at creation, or the `/repo` slash command through `_kiro…/commands/execute`) | Medium — the repo picker is core to session creation. |
+| A4 | ~~Repository selection is reachable programmatically~~ — **superseded by [ADR-004 §7](ADR-004-work-repo-selection.md#7-assumptions-to-verify--extends-adr-001-5-same-numbering) (A7–A12).** The research behind ADR-004 showed this assumption conflated *binding* a repo with *enumerating* the available ones; they have different answers. | — |
 | A5 | Permission/approval requests arrive as server-initiated ACP requests the client can answer | High — approvals are a headline feature. Docs say a waiting request is presented to the next client that attaches, which implies yes. |
 | A6 | `kiro-cli login --use-device-flow` can be driven non-interactively enough to scrape the verification URI and code | Medium — otherwise sign-in is a one-time manual step on the bridge host, which is acceptable but worse UX. |
 
 **F-01 is a spike whose only job is to answer A1–A6.** Nothing downstream should be estimated until it reports.
+
+Two later ADRs extend this list rather than starting their own: [ADR-004 §7](ADR-004-work-repo-selection.md#7-assumptions-to-verify--extends-adr-001-5-same-numbering) adds **A7–A12** (repository binding and enumeration) and [ADR-005 §7](ADR-005-bridge-hosting-and-availability.md#7-assumptions-to-verify--extends-adr-001-5-and-adr-004-7) adds **A13–A17** (bridge fungibility, durable approvals, headless CLI residency). The numbering is global on purpose — there is one list of things we do not yet know.
 
 ---
 
@@ -163,6 +165,7 @@ These are load-bearing and currently **unverified**. Each is cheap to check agai
 - The bridge is a first-class deliverable of this project, not a dev convenience.
 - Onboarding must explain the bridge requirement honestly and early.
 - If Option C lands, the migration is one new gateway implementation plus an onboarding change — by design.
+- Two follow-on ADRs take up what this one deferred: [ADR-004](ADR-004-work-repo-selection.md) on how a work repository is chosen, and [ADR-005](ADR-005-bridge-hosting-and-availability.md) on where the bridge runs and what the app does when it is unreachable.
 
 ---
 

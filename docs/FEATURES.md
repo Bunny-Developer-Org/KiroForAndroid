@@ -2,7 +2,7 @@
 
 Work items for **KiroForAndroid** — an Android client for [Kiro](https://kiro.dev) cloud sessions.
 
-Each item is scoped to be picked up independently by one agent. Read [§ How to pick up an item](#how-to-pick-up-an-item) before starting, and read [ADR-001](adr/ADR-001-cloud-session-access.md) first — it constrains every item here.
+Each item is scoped to be picked up independently by one agent. Read [§ How to pick up an item](#how-to-pick-up-an-item) before starting, and read [ADR-001](adr/ADR-001-cloud-session-access.md) first — it constrains every item here. [ADR-004](adr/ADR-004-work-repo-selection.md) (how a work repository is chosen) and [ADR-005](adr/ADR-005-bridge-hosting-and-availability.md) (where the bridge runs, and what the app does when it is unreachable) refine it and touch F-01, F-03, F-07, F-11, F-15 and F-16.
 
 **Legend** — Size: `S` <1d · `M` 1–3d · `L` 1–2w · `XL` 2w+. `∥` = safe to run in parallel with its phase-mates.
 
@@ -18,15 +18,25 @@ Each item is scoped to be picked up independently by one agent. Read [§ How to 
 - **Depends on:** nothing.
 
 ### F-01 · Protocol spike: verify assumptions, capture golden fixtures · `M`
-**The highest-value item in this backlog.** ADR-001 §5 lists six load-bearing assumptions (A1–A6) that are currently unverified. If A1/A2/A5 are wrong, the architecture changes. Estimates for Phase 1+ are not credible until this reports.
+**The highest-value item in this backlog.** ADR-001 §5 lists six load-bearing assumptions (A1–A6) that are currently unverified; [ADR-004 §7](adr/ADR-004-work-repo-selection.md#7-assumptions-to-verify--extends-adr-001-5-same-numbering) adds **A7–A12** (repository binding and enumeration — these supersede A4) and [ADR-005 §7](adr/ADR-005-bridge-hosting-and-availability.md#7-assumptions-to-verify--extends-adr-001-5-and-adr-004-7) adds **A13–A17**. If A1/A2/A5/A8/A14/A15 are wrong, the architecture changes. Estimates for Phase 1+ are not credible until this reports.
 
-- **Do:** on a machine with a real `kiro-cli` and a Pro account — create a cloud session with `--cloud --repo`; try attaching via `kiro-cli acp` and `session/load`; capture the raw JSON-RPC frames for a full turn including at least one tool call and one permission prompt; determine how repositories are bound programmatically; determine the real `_kiro` extension prefix; test whether `login --use-device-flow` output can be parsed for the verification URI and code; check what `whoami --format json` exposes about entitlement.
+- **Do:** on a machine with a real `kiro-cli` and a Pro account — create a cloud session with `--cloud --repo`; try attaching via `kiro-cli acp` and `session/load`; capture the raw JSON-RPC frames for a full turn including at least one tool call and one permission prompt; determine the real `_kiro` extension prefix; test whether `login --use-device-flow` output can be parsed for the verification URI and code; check what `whoami --format json` exposes about entitlement.
+- **Also do, for [ADR-004](adr/ADR-004-work-repo-selection.md) (A7–A12):** capture `--repo`'s syntax **verbatim** from `--help`; confirm a session can be created with repos bound **non-interactively**, with no forced `/repo` step; run that creation from an empty `/tmp` directory to confirm no working-directory or checkout dependency; record what `commands/available` lists and whether `commands/options` answers for `/repo`; capture the error frame for a repository the account cannot reach.
+- **Also do, for [ADR-005](adr/ADR-005-bridge-hosting-and-availability.md) (A13–A16):** attach to one session from **two** hosts signed in as the same account; leave a permission request unanswered with no client attached, then reattach and check it is re-presented; leave a headless host idle overnight and confirm the CLI is still signed in; measure memory for several concurrent supervised sessions.
 - **Done when:**
-  - ADR-001 §5 is updated with a verified/refuted verdict per assumption.
+  - Every assumption gets a verified/refuted verdict written back into the ADR that owns it — A1–A6 in ADR-001 §5, A7–A12 in ADR-004 §7, A13–A16 in ADR-005 §7.
   - Real frame sequences are committed as JSONL fixtures under `core/src/test/resources/fixtures/` (redact tokens, repo names, and paths).
   - A written note names any assumption that was refuted and what it implies.
 - **Scope out:** building anything. This is a research spike; its deliverables are fixtures and answers.
 - **Depends on:** access to `kiro-cli` + a Pro account. **This is a hard prerequisite — flag it immediately if unavailable, do not proceed by guessing.**
+
+### F-24 · Spike: can `kiro-cli` run on the device? · `S` ∥
+Timeboxed, non-blocking, high upside. [ADR-005 §4 Option E](adr/ADR-005-bridge-hosting-and-availability.md#option-e--the-bridge-on-the-phone) notes that `kiro-cli` ships for Linux `aarch64`, and Termux with a `proot-distro` userland is Linux `aarch64`. If it runs there, the bridge requirement — ADR-001's single largest cost — disappears without needing official API access.
+
+- **Do:** install `kiro-cli` under Termux + `proot-distro`; sign in; create a cloud session; leave it running while the screen is off. Stop at the first hard blocker.
+- **Done when:** ADR-005 assumption A17 is answered yes or no in writing, with the blocker named. A one-paragraph "no, because X" is a complete and valuable result.
+- **Scope out:** productising it. Even a success changes an ADR before it changes any code — Doze, battery, and holding a signed-in Kiro account on a phone are separate questions.
+- **Depends on:** nothing.
 
 ---
 
@@ -39,7 +49,7 @@ Each item is scoped to be picked up independently by one agent. Read [§ How to 
 - **Depends on:** nothing. Start immediately, in parallel with F-01.
 
 ### F-03 · Bridge service (MVP) · `L`
-The host-side process from ADR-001. Not a dev convenience — it is the product's backend.
+The host-side process from ADR-001. Not a dev convenience — it is the product's backend. [ADR-005](adr/ADR-005-bridge-hosting-and-availability.md) decides its shape: it is a **thin relay** — no checkout, no git credentials, no meaningful working directory (pin one anyway so stray *local* sessions never enter our list, and filter on the `environment` column) — and it ships as a **multi-arch container image** with a safe-by-default network posture.
 
 - **Do:** a process that runs where `kiro-cli` is installed and: spawns/supervises the CLI as an ACP agent; exposes JSON-RPC over an authenticated WebSocket; issues single-use pairing codes and long-lived revocable device tokens; assigns monotonic sequence numbers and maintains a per-session replay log; implements the `_bridge/…` control messages from [ACP-INTEGRATION §7](ACP-INTEGRATION.md#7-reconnect-and-replay--our-design-not-kiros).
 - **Security requirements** (from [AUTHENTICATION §4](AUTHENTICATION.md#4-auth-1-pairing-the-app-to-the-bridge), all mandatory): binds `127.0.0.1` by default with explicit opt-in to `0.0.0.0`; TLS required for non-loopback; pairing codes single-use and ~5 min TTL; rate-limited pairing; revocable device list.
@@ -72,7 +82,8 @@ Read [AUTHENTICATION.md](AUTHENTICATION.md) in full before starting any of these
 ### F-07 · Bridge pairing UX · `M`
 - **Do:** onboarding that pairs the app to a bridge — QR scan (bridge prints a QR of `wss://host:port` + pairing code) plus manual entry fallback. Clear, non-generic error states for unreachable host, bad code, expired code, TLS failure.
 - **Done when:** a user can pair by scanning, the token persists via F-06, and a wrong/expired code produces a message that says what to do next.
-- **Onboarding must state honestly that a bridge host is required** (ADR-001 §4) — on the first screen, not buried in a help page.
+- **Onboarding must state honestly that a bridge host is required** (ADR-001 §4) — on the first screen, not buried in a help page. Follow the five-step order in [ADR-005 §5.4](adr/ADR-005-bridge-hosting-and-availability.md#54-onboarding-tells-the-truth-in-this-order): state the requirement → recommend an always-on host and name what a workstation-only bridge costs → pair → sign in to Kiro → **connect a source provider** in Kiro's own settings via Custom Tab. Skipping the last step leaves F-11's repository picker empty with nothing to explain why.
+- **Pair with a *list* of bridges, not one** ([ADR-005 §5.2](adr/ADR-005-bridge-hosting-and-availability.md#52-multiple-bridges-are-a-supported-configuration-not-an-accident)). Sessions live in the Kiro account, so any bridge signed in as the same account can reach them; store bridges with a per-bridge last-seen.
 - **Depends on:** F-03, F-06.
 
 ### F-08 · Kiro sign-in via device flow, relayed through the app · `M`
@@ -105,7 +116,8 @@ Read [AUTHENTICATION.md](AUTHENTICATION.md) in full before starting any of these
 - **Do:** a create flow with — repository multi-select from the user's connected GitHub/GitLab account (removable pills, matching how other Kiro surfaces present bound repos); model selection; autonomy level (**Autopilot** or **Autonomous** only — Supervised does not exist for cloud sessions); first-prompt composer; submit, provision, and land in the live transcript.
 - **Constraints to honour rather than paper over:** repositories are fixed at creation time; **branches cannot be selected** — set the expectation in the UI and mention that the agent can be asked to create a branch once running; the preview caps concurrent sessions at 10, so handle that failure specifically.
 - **Done when:** a session can be created from the phone with 1..n repos and a first prompt, the composer is locked during provisioning with visible progress, and every documented failure mode has its own message.
-- **Depends on:** F-05, F-09. Repository listing mechanism comes from F-01 (assumption A4).
+- **The picker is specified in [ADR-004 §5](adr/ADR-004-work-repo-selection.md#5-decision):** three layered `RepoCatalog` implementations — `commands/options` when the extension answers, most-recently-used repos derived from existing sessions, and manual `owner/repo` entry, which is a **permanent affordance, never a failure state**. Validation is shape-only; a server rejection most likely means the Kiro Agent App is not installed for that repository, and the error should say so and offer a Custom Tab into Kiro's settings.
+- **Depends on:** F-05, F-09. Enumeration quality — not the ability to create a session — depends on F-01 (assumptions A9/A10).
 
 ### F-12 · Transcript rendering + streaming · `L`
 - **Do:** the live conversation view — user messages, agent messages, collapsible tool-call entries with status, and the four update kinds from [ACP-INTEGRATION §4](ACP-INTEGRATION.md#4-streaming-updates).
@@ -127,10 +139,12 @@ Read [AUTHENTICATION.md](AUTHENTICATION.md) in full before starting any of these
 The item that decides whether the app is trustworthy. A session that dies when the phone locks is a broken client regardless of how good the UI looks.
 
 - **Do:** a `dataSync` foreground service for active turns; exponential backoff with jitter; eager reconnect on connectivity-regained; the `lastSeq` replay protocol from [ACP-INTEGRATION §7](ACP-INTEGRATION.md#7-reconnect-and-replay--our-design-not-kiros); explicit handling of Android 15's 6h/24h `dataSync` cap including `onTimeout()`; Doze-aware behaviour.
-- **Done when:** backgrounding the app, locking the phone, flipping wifi→cellular, and killing the socket mid-turn all resume with **no gap and no duplicate entries**; log truncation past `lastSeq` triggers an honest full refetch rather than a silent hole.
+- **Also do — the degradation contract** from [ADR-005 §5.3](adr/ADR-005-bridge-hosting-and-availability.md#53-the-degradation-contract), which is acceptance criteria, not polish: render the session list from cache with a visible "last synced"; name the state ("bridge unreachable — last seen 3h ago", and say the machine is probably asleep when the only bridge is a workstation); disable create **with a reason**; select between paired bridges and refetch the transcript when the chosen bridge has no replay log for a session. **Never queue prompts for later delivery** — a prompt composed hours ago against unseen state, delivered unattended to an autonomous agent with repository write access, is the one failure mode worth designing out. Hold the draft; send it when the user is present.
+- **Done when:** backgrounding the app, locking the phone, flipping wifi→cellular, and killing the socket mid-turn all resume with **no gap and no duplicate entries**; log truncation past `lastSeq` triggers an honest full refetch rather than a silent hole; and every bridge-unreachable path shows a named state rather than a spinner.
 - **Depends on:** F-03, F-12.
 
 ### F-16 · Push notifications · `M`
+**Delivery depends on a reachable bridge** — pushes are sent by it. A sleeping workstation bridge is a silent app; that is a documented limitation ([ADR-005 §3](adr/ADR-005-bridge-hosting-and-availability.md#3-the-availability-question)), not a bug to chase, and it is the main reason an always-on host is the recommended setup.
 - **Do:** FCM for *turn finished* and *approval needed*, with inline allow/deny actions on the approval notification. Bridge sends; app receives, wakes, and answers.
 - **Done when:** an approval can be answered from the notification shade with the app backgrounded; notification channels are separated so users can silence turn-completion without silencing approvals.
 - **Depends on:** F-03, F-14, F-15.
@@ -143,7 +157,7 @@ The item that decides whether the app is trustworthy. A session that dies when t
 [ADR-002](adr/ADR-002-react-native-vs-native.md) identifies this as the **one area where the native choice is genuinely weaker** than React Native, and explicitly asks that it be budgeted as a named work item rather than absorbed as an afterthought. Treat that as the brief.
 
 - **Do:** evaluate a Compose syntax highlighter vs. a contained WebView for diffs only; implement code blocks with language detection, horizontal scroll, and copy; implement unified/split diff viewing.
-- **Done when:** the languages in the project's own test repos render correctly, and the approach + rejected alternatives are recorded in a short ADR-004.
+- **Done when:** the languages in the project's own test repos render correctly, and the approach + rejected alternatives are recorded in a short **ADR-006** (004 and 005 are taken).
 - **Depends on:** F-12.
 
 ### F-18 · Result and PR surfacing · `S`
@@ -185,6 +199,7 @@ Signing, versioning, reproducible builds, and a distribution decision. **Note:**
 
 ```
 F-00 ─┐                                    (independent, non-code)
+F-24 ─┤                                    (independent spike, ADR-005 A17)
 F-01 ─┴─► F-03 ─┬────────────────► F-07 ─► F-08 ─► F-09 ─┐
                 │                                         │
 F-02 ─► F-04 ─► F-05 ─┬─► F-10 ────────────────────────► F-11
@@ -197,7 +212,7 @@ F-02 ─► F-04 ─► F-05 ─┬─► F-10 ───────────
                                             F-19/20/21/23 ┘
 ```
 
-- **Start now, in parallel:** F-00, F-01, F-02.
+- **Start now, in parallel:** F-00, F-01, F-02, F-24.
 - **Widest parallel band:** after F-05, the UI items (F-10, F-12, F-17, F-18) can all proceed against `FakeGateway` while F-03 and F-15 handle the hard infrastructure.
 - **Single-threaded chain:** F-03 → F-07 → F-08 → F-09. Auth is sequential by nature; don't split it across agents.
 - **Highest-risk items:** F-01 (may invalidate the plan), F-15 (hardest to get right), F-03 (most security-sensitive).
