@@ -12,10 +12,12 @@ This ADR pins the concrete stack so that feature work items can name packages an
 
 | Concern | Choice | Notes |
 |---|---|---|
-| Language | Kotlin 2.0.x | |
+| Language | **Kotlin 2.4.10** | Was "2.0.x". Kotlin 2.0 cannot drive AGP 9, and AGP 9 is what the current SDK requires. Corrected by F-02. |
 | UI | Jetpack Compose + Material 3 | Compose BOM, so individual artifact versions stay aligned |
-| Min / target / compile SDK | 26 / 35 / 35 | minSdk 26 keeps adaptive icons and modern crypto available and covers effectively the whole active device base |
-| JDK for the build | **17 or 21** | AGP does not support JDK 22+. The sandbox default is JDK 25, so CI and local builds must pin `JAVA_HOME`. This bites immediately; see §4. |
+| Min / target / compile SDK | **26 / 36 / 36** | minSdk 26 unchanged — it keeps adaptive icons and modern crypto available and covers effectively the whole active device base. 35 → 36 because AGP 9.4 is the current toolchain. |
+| Android Gradle Plugin | **9.4.0** | **AGP 9 applies the Kotlin plugin itself.** Adding `org.jetbrains.kotlin.android` alongside it is now a hard error, not a redundancy — the first thing F-02 hit. |
+| Gradle | **9.7.1**, via the committed wrapper | |
+| JDK for the build | **17 or 21** | AGP does not support JDK 22+. The sandbox default is JDK 25, so CI and local builds must pin `JAVA_HOME`. This bites immediately; see §4. `core/` and `bridge/` emit **Java 17 bytecode** whichever of the two runs the build, rather than demanding a JDK 17 toolchain that may not be installed. |
 | Build | Gradle Kotlin DSL + version catalog (`gradle/libs.versions.toml`) | No buildSrc; catalog only |
 | Async | Coroutines + `Flow` | Session updates are a `Flow`, not callbacks |
 | JSON | `kotlinx.serialization` | Configured `ignoreUnknownKeys = true` — non-negotiable, see §3 |
@@ -84,14 +86,14 @@ app/   dev.kiro.android
 
 Feature work items in [FEATURES.md](../FEATURES.md) reference these paths directly. If a work item needs a new package, it says so.
 
-### Bridge language — open decision
+### Bridge language — **decided: Kotlin/JVM** (F-03, 2026-09-02)
 
-Two candidates, to be settled by whoever takes F-03:
+The weak preference held, and two things that arrived after this ADR was written strengthened it:
 
-- **Kotlin/JVM** — shares `core/`'s protocol types verbatim, one language across the project, ships as a fat jar. Cost: requires a JVM on the host.
-- **Node/TypeScript** — lower install friction for most developers, trivial process spawning. Cost: protocol types are duplicated and can drift, which is exactly the bug class we least want.
+- **[ADR-005](ADR-005-bridge-hosting-and-availability.md) made the artifact a container image**, which flattens the "requires a JVM on the host" objection almost to nothing. Nobody installing a container cares what is inside it.
+- **[PROTOCOL-FINDINGS §4](../PROTOCOL-FINDINGS.md#4-the-larger-finding-kas-already-solves-most-of-f-03) shrank the bridge's job** to authentication, transport security, process supervision and a replay log. That is a small program, and the smaller it is the more the type sharing dominates: `bridge/` depends on `:core` and relays `RpcMessage` values the app parses with the same code that produced them. There is no second protocol definition to drift.
 
-Weak preference for **Kotlin/JVM**, because a drifting protocol definition between app and bridge would be a genuinely nasty class of bug and type sharing eliminates it outright. Not yet decided — F-03 owns it and must record the outcome here.
+The honest argument against, recorded because it is real: **KAS is a JS bundle and ships `.d.ts` declarations**, so a Node bridge could in principle track Kiro's own types rather than our transcription of them. That was not chosen — depending on a proprietary binary's declaration files in a shipped artifact is a licensing question, not a free win — but it is the strongest case for the road not taken, and it is the thing to re-examine if protocol drift ever becomes the bridge's main maintenance cost.
 
 ---
 

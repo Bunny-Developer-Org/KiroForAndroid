@@ -235,7 +235,13 @@ Fixture: [`prompt-turn-with-permission.jsonl`](../core/src/test/resources/fixtur
 
 ## 7. Reconnect and replay — our design, not Kiro's
 
-> **Re-open this before implementing it.** F-01 found that every update already carries `_meta.kiro.messageId` and `timestamp`, that `session/load` replays history in order, and that KAS itself multiplexes clients and re-sends pending permissions. The scheme below was designed without knowing any of that, and may be redundant. F-03 decides — resume-by-`messageId` first, this only if that proves insufficient — and records which way it went.
+> **Re-opened and decided (F-03, 2026-09-02): resume by `messageId`. The sequence-number scheme below is not implemented.**
+>
+> The deciding measurement: **all 57 updates in the captured cloud replay carry `_meta.kiro.messageId`** — every kind, not just turn boundaries. A parallel numbering scheme would have been a second identifier for something the agent already identifies uniquely, and a second thing to keep correct.
+>
+> What the id alone does *not* give is **ordering and retention**, and that part of the design below survives: the bridge keeps a bounded, ordered, per-session log and answers `_bridge/resume {sessionId, afterMessageId}` from it. The contract that matters is unchanged — when the requested point has been evicted, or belongs to a session this bridge never saw, it answers `{"truncated": true}` and the app refetches the transcript rather than rendering a hole.
+>
+> "A session this bridge never saw" is not an error case. Sessions live in the Kiro account and bridges are fungible, so switching bridges mid-session lands here by design.
 
 ACP does not document a resume-from-cursor mechanism, and a mobile client drops its socket constantly (backgrounding, network changes, Doze). So the bridge owns durability. The CLI already persists sessions as `<id>.json` plus a `<id>.jsonl` event log, which is the natural backing store.
 
