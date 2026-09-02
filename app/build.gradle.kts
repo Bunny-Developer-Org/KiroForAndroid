@@ -70,4 +70,10 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation(kotlin("test-junit"))
     testImplementation(kotlin("reflect"))
+    // Server-side Ktor, test-only: WebSocketAcpTransportTest drives a real
+    // embedded server so the regression it pins (handshake completing before
+    // send(), not lazily inside incoming's collector) can't be faked with a mock.
+    testImplementation(libs.ktor.server.core)
+    testImplementation(libs.ktor.server.cio)
+    testImplementation(libs.ktor.server.websockets)
 }

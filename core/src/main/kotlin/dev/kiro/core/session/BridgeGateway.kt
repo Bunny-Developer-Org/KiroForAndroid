@@ -100,7 +100,12 @@ public class BridgeGateway(
     /** Performs the handshake and starts routing inbound traffic. */
     public suspend fun connect() {
         _connection.value = ConnectionState.Connecting
-        client.start()
+        try {
+            client.start()
+        } catch (e: Throwable) {
+            _connection.value = ConnectionState.Disconnected
+            throw e
+        }
         startRouting()
 
         val result = try {

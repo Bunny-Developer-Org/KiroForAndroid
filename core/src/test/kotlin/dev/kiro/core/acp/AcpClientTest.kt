@@ -2,6 +2,7 @@ package dev.kiro.core.acp
 
 import dev.kiro.core.Fixtures
 import dev.kiro.core.util.DriftMetrics
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -26,10 +27,28 @@ class AcpClientTest {
         val inbound = Channel<RpcMessage>(Channel.UNLIMITED)
         val sent = mutableListOf<RpcMessage>()
         var closed = false
+        var connected = false
+        var connectCalls = 0
+        var failConnect = false
+
+        /**
+         * When set, [connect] suspends on this until it is completed — the
+         * controllable stand-in for a real handshake taking time. Left null
+         * (the default), [connect] completes immediately.
+         */
+        var connectGate: CompletableDeferred<Unit>? = null
 
         override val incoming: Flow<RpcMessage> = inbound.consumeAsFlow()
 
+        override suspend fun connect() {
+            connectCalls++
+            connectGate?.await()
+            if (failConnect) throw TransportClosedException("connect failed")
+            connected = true
+        }
+
         override suspend fun send(message: RpcMessage) {
+            if (!connected) throw TransportClosedException("connect() has not run")
             if (closed) throw TransportClosedException("closed")
             sent += message
         }
@@ -209,6 +228,75 @@ class AcpClientTest {
         runCurrent()
 
         assertTrue(handshake.await().message!!.contains("99"))
+        client.close()
+    }
+
+    /**
+     * `start()` is now suspend-through-connect: it must not hand control back to
+     * the caller until the transport handshake has actually finished, or the
+     * caller's very next line (a request) can race a still-connecting socket.
+     */
+    @Test
+    fun `start does not return until the transport has connected`() = runTest {
+        val transport = FakeTransport()
+        transport.connectGate = CompletableDeferred()
+        val client = AcpClient(transport, this)
+
+        val starting = async { client.start() }
+        runCurrent()
+
+        assertTrue(!starting.isCompleted)
+        assertEquals(1, transport.connectCalls)
+        assertTrue(transport.sent.isEmpty())
+
+        transport.connectGate!!.complete(Unit)
+        runCurrent()
+
+        assertTrue(starting.isCompleted)
+        client.close()
+    }
+
+    /**
+     * The regression test for the real bug: `BridgeGateway.connect()` calls
+     * `start()` and then immediately issues a request. If `start()` ever returns
+     * before the transport is actually connected again, this fails with
+     * `TransportClosedException` from [FakeTransport.send] instead of reaching
+     * the wire.
+     */
+    @Test
+    fun `a request issued straight after start reaches a connected transport`() = runTest {
+        val transport = FakeTransport()
+        val client = AcpClient(transport, this)
+
+        client.start()
+        val call = async { client.request("session/list") }
+        runCurrent()
+
+        assertEquals(1, transport.sent.filterIsInstance<RpcRequest>().size)
+        // The request never gets a response in this test; cancel it explicitly so
+        // closing the client doesn't leave an uncaught exception on `call`.
+        call.cancel()
+        client.close()
+    }
+
+    /**
+     * A failed `connect()` must not latch [AcpClient]'s internal pump, or the
+     * reconnect loop `MainActivity` runs every 2s would retry `start()` forever
+     * without it ever doing anything, since `pump != null` would short-circuit.
+     */
+    @Test
+    fun `a transport that cannot connect fails start and leaves no pump`() = runTest {
+        val transport = FakeTransport()
+        transport.failConnect = true
+        val client = AcpClient(transport, this)
+
+        assertFailsWith<TransportClosedException> { client.start() }
+        assertEquals(1, transport.connectCalls)
+
+        transport.failConnect = false
+        client.start()
+        assertEquals(2, transport.connectCalls)
+
         client.close()
     }
 }

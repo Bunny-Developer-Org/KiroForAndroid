@@ -13,8 +13,22 @@ import kotlinx.coroutines.flow.Flow
 public interface AcpTransport {
 
     /**
+     * Establishes the connection. Returns only once [send] is actually able to put
+     * a frame on the wire — the handshake has *completed*, not merely started.
+     *
+     * A failure throws [TransportClosedException]; there is nothing to clean up
+     * afterwards, since nothing was left half-open. Calling [connect] again on a
+     * transport that is already connected is a no-op.
+     */
+    public suspend fun connect()
+
+    /**
      * Inbound frames, already decoded. Completes when the peer goes away; fails
      * only on an error the transport itself cannot recover from.
+     *
+     * Collecting this requires a prior successful [connect] — it no longer
+     * establishes the connection itself, only streams frames from one already
+     * open.
      *
      * A frame that could not be parsed arrives as [RpcMalformed] rather than being
      * dropped here — deciding what to do with it belongs to [AcpClient], which can

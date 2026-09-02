@@ -71,8 +71,17 @@ public class AcpClient(
 
     private var pump: Job? = null
 
-    public fun start() {
+    /**
+     * Connects the transport and starts pumping [AcpTransport.incoming].
+     *
+     * Does not return until the transport is connected: only after this
+     * suspends through [AcpTransport.connect] and comes back is [request] or
+     * [notify] guaranteed to actually reach the wire. A failed connect leaves
+     * [pump] unset, so a later call genuinely retries rather than being a no-op.
+     */
+    public suspend fun start() {
         if (pump != null) return
+        transport.connect()
         pump = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 transport.incoming.collect { message -> dispatch(message) }
