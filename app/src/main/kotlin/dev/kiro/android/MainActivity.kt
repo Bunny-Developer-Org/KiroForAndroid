@@ -18,14 +18,19 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import dev.kiro.android.platform.PairingClient
+import dev.kiro.android.service.Backoff
 import dev.kiro.android.ui.onboarding.PairingScreen
 import dev.kiro.android.ui.AppNavigation
 import dev.kiro.android.ui.theme.KiroTheme
 import dev.kiro.core.auth.PairedBridge
 import dev.kiro.core.session.CloudSessionGateway
 import dev.kiro.core.session.ConnectionState
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 
 class MainActivity : ComponentActivity() {
 
@@ -68,40 +73,7 @@ private fun AppRoot() {
     LaunchedEffect(paired) {
         val bridge = paired ?: return@LaunchedEffect
         val token = ServiceLocator.tokenStore.get(bridge.id) ?: return@LaunchedEffect
-        while (true) {
-            runCatching { ServiceLocator.connect(bridge.url, token) }
-                .onSuccess { activeGtw ->
-                    gateway = activeGtw
-                    connection = ConnectionState.Connected(
-                        agentSupportsCloudSessions = true,
-                        supportsImages = true,
-                    )
-                    try {
-                        activeGtw.connection.collect { conn ->
-                            connection = conn
-                            if (conn !is ConnectionState.Connected) {
-                                gateway = ServiceLocator.gateway()
-                            }
-                        }
-                    } catch (e: Throwable) {
-                        ServiceLocator.logger.warn("connection dropped: ${e.message}")
-                        connection = ConnectionState.Unreachable(
-                            lastSeenMillis = bridge.lastSeenMillis,
-                            onlyBridgeIsWorkstation = true,
-                        )
-                        gateway = ServiceLocator.gateway()
-                    }
-                }
-                .onFailure { e ->
-                    ServiceLocator.logger.warn("connect failed: ${e.message}")
-                    connection = ConnectionState.Unreachable(
-                        lastSeenMillis = bridge.lastSeenMillis,
-                        onlyBridgeIsWorkstation = true,
-                    )
-                    gateway = ServiceLocator.gateway()
-                }
-            delay(2000)
-        }
+        reconnectLoop(bridge, token, setGateway = { gateway = it }, setConnection = { connection = it })
     }
 
     if (paired == null) {
@@ -135,5 +107,82 @@ private fun AppRoot() {
         // Everything past pairing is one graph, so the transcript can be handed the
         // session object it already has rather than an id to look up again.
         AppNavigation(gateway = gateway, connection = connection)
+    }
+}
+
+/**
+ * Connects, streams until the socket drops, then backs off and retries --
+ * forever, since a paired bridge is expected to come and go with the
+ * workstation's own sleep/wake cycle.
+ *
+ * One [Backoff] for the whole loop, not one per attempt: the attempt count and
+ * delay only mean anything if they accumulate across a losing streak, and
+ * [Backoff.reset] is what lets a network-regained event erase that streak.
+ */
+private suspend fun reconnectLoop(
+    bridge: PairedBridge,
+    token: String,
+    setGateway: (CloudSessionGateway) -> Unit,
+    setConnection: (ConnectionState) -> Unit,
+) {
+    val backoff = Backoff()
+    while (true) {
+        runCatching { ServiceLocator.connect(bridge.url, token) }
+            .onSuccess { activeGtw ->
+                backoff.reset()
+                setGateway(activeGtw)
+                setConnection(
+                    ConnectionState.Connected(agentSupportsCloudSessions = true, supportsImages = true),
+                )
+                try {
+                    activeGtw.connection.collect { conn ->
+                        setConnection(conn)
+                        if (conn !is ConnectionState.Connected) {
+                            setGateway(ServiceLocator.gateway())
+                        }
+                    }
+                } catch (e: Throwable) {
+                    ServiceLocator.logger.warn("connection dropped: ${e.message}")
+                    setConnection(
+                        ConnectionState.Unreachable(
+                            lastSeenMillis = bridge.lastSeenMillis,
+                            onlyBridgeIsWorkstation = true,
+                        ),
+                    )
+                    setGateway(ServiceLocator.gateway())
+                }
+            }
+            .onFailure { e ->
+                ServiceLocator.logger.warn("connect failed: ${e.message}")
+                setConnection(
+                    ConnectionState.Unreachable(
+                        lastSeenMillis = bridge.lastSeenMillis,
+                        onlyBridgeIsWorkstation = true,
+                    ),
+                )
+                setGateway(ServiceLocator.gateway())
+            }
+
+        val waitMillis = backoff.nextDelayMillis()
+        setConnection(ConnectionState.Reconnecting(attempt = backoff.attempts, nextRetryMillis = waitMillis))
+        awaitRetryOrConnectivity(waitMillis, backoff)
+    }
+}
+
+/**
+ * Races the backoff wait against connectivity coming back, so a phone that
+ * regains a network 45s into a 60s wait does not sit out the rest of it
+ * before trying again.
+ */
+private suspend fun awaitRetryOrConnectivity(waitMillis: Long, backoff: Backoff) {
+    coroutineScope {
+        val waitJob = async { delay(waitMillis) }
+        val connectivityJob = async { ServiceLocator.connectivityObserver.onConnectivityRegained.first() }
+        select<Unit> {
+            waitJob.onAwait { }
+            connectivityJob.onAwait { backoff.reset() }
+        }
+        waitJob.cancel()
+        connectivityJob.cancel()
     }
 }
