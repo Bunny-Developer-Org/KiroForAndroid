@@ -41,7 +41,7 @@ fun AppNavigation(gateway: CloudSessionGateway, connection: ConnectionState) {
     var screen by remember { mutableStateOf<Screen>(Screen.Sessions) }
     var sessions by remember { mutableStateOf<List<CloudSession>>(emptyList()) }
 
-    LaunchedEffect(gateway) {
+    LaunchedEffect(gateway, connection) {
         sessions = runCatching { gateway.listSessions() }.getOrDefault(emptyList())
     }
 

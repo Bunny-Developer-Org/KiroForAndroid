@@ -61,12 +61,24 @@ public class TranscriptReducer(
             ),
         )
 
-        is SessionUpdate.ToolCallStarted -> state.appending(
-            TranscriptEntry.ToolCallEntry(
-                id = update.toolCall.toolCallId,
-                toolCall = update.toolCall,
-            ),
-        )
+        is SessionUpdate.ToolCallStarted -> {
+            val existingIndex = state.entries.indexOfFirst {
+                it is TranscriptEntry.ToolCallEntry && it.toolCall.toolCallId == update.toolCall.toolCallId
+            }
+            if (existingIndex >= 0) {
+                val existing = state.entries[existingIndex] as TranscriptEntry.ToolCallEntry
+                val updated = existing.copy(toolCall = update.toolCall)
+                val newEntries = state.entries.toMutableList().also { it[existingIndex] = updated }
+                state.copy(entries = newEntries)
+            } else {
+                state.appending(
+                    TranscriptEntry.ToolCallEntry(
+                        id = update.toolCall.toolCallId,
+                        toolCall = update.toolCall,
+                    ),
+                )
+            }
+        }
 
         is SessionUpdate.ToolCallUpdated -> state.updatingToolCall(update)
 

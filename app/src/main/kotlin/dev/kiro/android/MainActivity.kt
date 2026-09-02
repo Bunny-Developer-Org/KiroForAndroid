@@ -22,7 +22,9 @@ import dev.kiro.android.ui.onboarding.PairingScreen
 import dev.kiro.android.ui.AppNavigation
 import dev.kiro.android.ui.theme.KiroTheme
 import dev.kiro.core.auth.PairedBridge
+import dev.kiro.core.session.CloudSessionGateway
 import dev.kiro.core.session.ConnectionState
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -55,30 +57,50 @@ private fun AppRoot() {
     val scope = rememberCoroutineScope()
     var paired by remember { mutableStateOf<PairedBridge?>(null) }
     var connection by remember { mutableStateOf<ConnectionState>(ConnectionState.Disconnected) }
+    var gateway by remember { mutableStateOf<CloudSessionGateway>(ServiceLocator.gateway()) }
     var pairingError by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         paired = ServiceLocator.bridges.list().firstOrNull()
-        paired?.let { bridge ->
-            val token = ServiceLocator.tokenStore.get(bridge.id)
-            if (token != null) {
-                runCatching { ServiceLocator.connect(bridge.url, token) }
-                    .onSuccess { _ ->
-                        connection = ConnectionState.Connected(
-                            agentSupportsCloudSessions = true,
-                            supportsImages = true,
-                        )
-                    }
-                    .onFailure {
-                        // A named state, not a spinner: the bridge is very often
-                        // simply a machine that is asleep.
+    }
+
+    LaunchedEffect(paired) {
+        val bridge = paired ?: return@LaunchedEffect
+        val token = ServiceLocator.tokenStore.get(bridge.id) ?: return@LaunchedEffect
+        while (true) {
+            runCatching { ServiceLocator.connect(bridge.url, token) }
+                .onSuccess { activeGtw ->
+                    gateway = activeGtw
+                    connection = ConnectionState.Connected(
+                        agentSupportsCloudSessions = true,
+                        supportsImages = true,
+                    )
+                    try {
+                        activeGtw.connection.collect { conn ->
+                            connection = conn
+                            if (conn !is ConnectionState.Connected) {
+                                gateway = ServiceLocator.gateway()
+                            }
+                        }
+                    } catch (e: Throwable) {
+                        ServiceLocator.logger.warn("connection dropped: ${e.message}")
                         connection = ConnectionState.Unreachable(
                             lastSeenMillis = bridge.lastSeenMillis,
                             onlyBridgeIsWorkstation = true,
                         )
+                        gateway = ServiceLocator.gateway()
                     }
-            }
+                }
+                .onFailure { e ->
+                    ServiceLocator.logger.warn("connect failed: ${e.message}")
+                    connection = ConnectionState.Unreachable(
+                        lastSeenMillis = bridge.lastSeenMillis,
+                        onlyBridgeIsWorkstation = true,
+                    )
+                    gateway = ServiceLocator.gateway()
+                }
+            delay(2000)
         }
     }
 
@@ -112,6 +134,6 @@ private fun AppRoot() {
     } else {
         // Everything past pairing is one graph, so the transcript can be handed the
         // session object it already has rather than an id to look up again.
-        AppNavigation(gateway = ServiceLocator.gateway(), connection = connection)
+        AppNavigation(gateway = gateway, connection = connection)
     }
 }

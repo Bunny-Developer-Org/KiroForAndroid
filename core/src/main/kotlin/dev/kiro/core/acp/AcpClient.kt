@@ -2,6 +2,7 @@ package dev.kiro.core.acp
 
 import dev.kiro.core.util.DriftMetrics
 import dev.kiro.core.util.Logger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -75,6 +76,14 @@ public class AcpClient(
         pump = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 transport.incoming.collect { message -> dispatch(message) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                // The transport doesn't reconnect by design (WebSocketAcpTransport's
+                // own doc). failAllPending below is how callers actually learn the
+                // connection died; letting this escape would instead crash the whole
+                // scope, since nothing joins this fire-and-forget pump job.
+                logger.warn("transport closed: ${e.message}")
             } finally {
                 failAllPending(TransportClosedException("transport closed"))
             }

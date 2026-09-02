@@ -55,10 +55,20 @@ object ServiceLocator {
     fun gateway(): CloudSessionGateway = activeGateway ?: FakeGateway()
 
     suspend fun connect(url: String, token: String): CloudSessionGateway {
+        // MainActivity's reconnect loop calls this every 2s until it succeeds; without
+        // closing what came before, each attempt leaks a socket and a pump coroutine
+        // rather than replacing the last one.
+        activeGateway?.disconnect()
+        activeGateway = null
         val transport = WebSocketAcpTransport(url, token)
         val client = AcpClient(transport, scope, logger, metrics)
         val gateway = BridgeGateway(client, scope, logger, metrics)
-        gateway.connect()
+        try {
+            gateway.connect()
+        } catch (e: Throwable) {
+            gateway.disconnect()
+            throw e
+        }
         activeGateway = gateway
         return gateway
     }

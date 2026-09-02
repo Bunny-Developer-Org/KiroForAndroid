@@ -100,14 +100,18 @@ public class FakeGateway(
         return "end_turn"
     }
 
+    private var toolCallCounter = 0
+    private var replyCounter = 0
+
     /**
      * Emits one chunk at a time with a real delay, so the transcript's coalescing
      * tick is exercised rather than bypassed by an instant burst.
      */
     private suspend fun replayScriptedTurn(sessionId: String) {
         _updates.emit(SessionUpdate.TurnStarted(sessionId))
+        val currentToolIndex = ++toolCallCounter
         val toolCall = ToolCall(
-            toolCallId = "fake-tool-1",
+            toolCallId = "fake-tool-$currentToolIndex",
             title = "ls -la",
             kind = "execute",
             status = ToolCall.Status.PENDING,
@@ -129,9 +133,10 @@ public class FakeGateway(
                 rpcId = null,
             ),
         )
+        val replyId = "fake-reply-${++replyCounter}"
         for (chunk in SCRIPTED_REPLY) {
             delay(CHUNK_INTERVAL_MILLIS)
-            _updates.emit(SessionUpdate.AgentMessageChunk(sessionId, chunk, "fake-reply"))
+            _updates.emit(SessionUpdate.AgentMessageChunk(sessionId, chunk, replyId))
         }
         _updates.emit(SessionUpdate.TurnEnded(sessionId, "end_turn"))
         _updates.emit(
@@ -154,6 +159,24 @@ public class FakeGateway(
     ) {
         _updates.emit(
             SessionUpdate.InteractionResolved(sessionId, toolCallId, "selected", optionId),
+        )
+        val isReject = optionId.contains("reject")
+        _updates.emit(
+            SessionUpdate.ToolCallUpdated(
+                sessionId = sessionId,
+                toolCallId = toolCallId,
+                status = if (isReject) ToolCall.Status.FAILED else ToolCall.Status.COMPLETED,
+                title = "ls -la",
+                output = if (isReject) {
+                    listOf("Permission denied by user")
+                } else {
+                    listOf(
+                        "total 0\n" +
+                            "drwxr-xr-x 2 user user 4096 Sep 2 15:30 .\n" +
+                            "drwxr-xr-x 4 user user 4096 Sep 2 15:30 ..",
+                    )
+                },
+            ),
         )
     }
 

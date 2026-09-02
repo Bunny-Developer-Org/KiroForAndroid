@@ -203,4 +203,23 @@ class TranscriptReducerTest {
         // client that used it would announce the wrong thing entirely.
         assertEquals("id -un", parsed.summary)
     }
+
+    @Test
+    fun `a duplicate tool call started event updates existing tool call rather than creating duplicate entries`() {
+        val tool1 = ToolCall("t1", "pytest", "execute", ToolCall.Status.PENDING, emptyMap(), emptyList())
+        val tool1Updated =
+            ToolCall("t1", "pytest (retry)", "execute", ToolCall.Status.IN_PROGRESS, emptyMap(), emptyList())
+        val state = reducer.reduceAll(
+            TranscriptReducer.State(),
+            listOf(
+                SessionUpdate.ToolCallStarted("s", tool1),
+                SessionUpdate.ToolCallStarted("s", tool1Updated),
+            ),
+        )
+        assertEquals(1, state.entries.size)
+        val entry = state.entries.filterIsInstance<TranscriptEntry.ToolCallEntry>().single()
+        assertEquals("t1", entry.toolCall.toolCallId)
+        assertEquals(ToolCall.Status.IN_PROGRESS, entry.toolCall.status)
+        assertEquals("pytest (retry)", entry.toolCall.title)
+    }
 }

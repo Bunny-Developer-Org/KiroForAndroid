@@ -81,8 +81,8 @@ fun ApprovalCard(
             // The role edge: warn while pending.
             Box(
                 Modifier
+                    .matchParentSize()
                     .width(3.dp)
-                    .fillMaxHeight()
                     .background(colors.warn),
             )
 
