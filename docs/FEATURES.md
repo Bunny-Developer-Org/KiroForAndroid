@@ -112,9 +112,10 @@ The host-side process from ADR-001. Not a dev convenience — it is the product'
 
 Read [AUTHENTICATION.md](AUTHENTICATION.md) in full before starting any of these. The two-authentication split (app↔bridge vs bridge↔Kiro) is the thing to get right.
 
-### F-07 · Bridge pairing UX · `M` · 🟡 **PARTIAL** — manual entry, honest onboarding copy and distinct error states done; QR scan and the multi-bridge list are not
+### F-07 · Bridge pairing UX · `M` · 🟡 **PARTIAL** — manual entry, honest onboarding copy, distinct error states, and the multi-bridge list (add/remove/switch) done 2026-09-02; QR scan is not
 - **Do:** onboarding that pairs the app to a bridge — QR scan (bridge prints a QR of `wss://host:port` + pairing code) plus manual entry fallback. Clear, non-generic error states for unreachable host, bad code, expired code, TLS failure.
 - **Done when:** a user can pair by scanning, the token persists via F-06, and a wrong/expired code produces a message that says what to do next.
+- **Multi-bridge list shipped 2026-09-02**: `BridgeListScreen` (add another bridge, remove with confirmation, switch active bridge) against the already-built `BridgeRegistry`/`DataStoreBridgeRegistry`. QR scanning remains undone — it needs a new camera dependency (no CameraX/ML-Kit/ZXing in the catalog today) and is a separately-scoped follow-up.
 - **Onboarding must state honestly that a bridge host is required** (ADR-001 §4) — on the first screen, not buried in a help page. Follow the five-step order in [ADR-005 §5.4](adr/ADR-005-bridge-hosting-and-availability.md#54-onboarding-tells-the-truth-in-this-order): state the requirement → recommend an always-on host and name what a workstation-only bridge costs → pair → sign in to Kiro → **connect a source provider** in Kiro's own settings via Custom Tab. Skipping the last step leaves F-11's repository picker empty with nothing to explain why.
 - **Pair with a *list* of bridges, not one** ([ADR-005 §5.2](adr/ADR-005-bridge-hosting-and-availability.md#52-multiple-bridges-are-a-supported-configuration-not-an-accident)). Sessions live in the Kiro account, so any bridge signed in as the same account can reach them; store bridges with a per-bridge last-seen.
 - **Depends on:** F-03, F-06.
@@ -139,12 +140,12 @@ Read [AUTHENTICATION.md](AUTHENTICATION.md) in full before starting any of these
 
 ## Phase 3 — Create and run a cloud session
 
-### F-10 · Session list, resume, delete · `M` · 🟡 **PARTIAL** — list with both statuses and live roster push done; delete and pin are not
+### F-10 · Session list, resume, delete · `M` · ✅ **DONE 2026-09-02**
 - **Do:** list cloud sessions with live status, ordered by recent activity; resume into F-12; delete with confirmation; pin.
 - **Show both statuses.** A session carries `status` (`idle`/`in_progress`) and `instanceStatus` (the sandbox VM's own lifecycle, e.g. `suspended`). "Idle but suspended" and "idle and warm" mean different wait times when you tap in, and only one of them is instant.
 - **The roster pushes itself.** `_kiro/sessions/changed` delivers upserts and deletes with status transitions, so the list can be live without polling.
 - **Note:** renaming is not supported in the cloud-session preview — don't build the affordance.
-- **Done when:** the list reflects real status, survives rotation and process death, and handles the empty state as an invitation to create a session rather than a blank screen.
+- **Done when:** the list reflects real status, survives rotation and process death, and handles the empty state as an invitation to create a session rather than a blank screen. **Shipped 2026-09-02**: delete (confirmation dialog, wired to the already-working `gateway.deleteSession`) and pin (client-local, DataStore-persisted, sorted to top) via a new `SessionListViewModel` that also fixes the rotation/process-death survival gap by replacing the old `remember{}` state in `AppNavigation`.
 - **Depends on:** F-05. Can be built against `FakeGateway` before F-03 lands.
 
 ### F-11 · New Cloud Session flow · `L` · 🟡 **PARTIAL** — repo multi-select, manual entry, mode, first prompt and the documented failure messages done; not exercised against a real create (spends credits)
@@ -163,26 +164,26 @@ Read [AUTHENTICATION.md](AUTHENTICATION.md) in full before starting any of these
 - **Done when:** a 500+ entry transcript scrolls smoothly on a mid-range device; an unknown update kind renders as a generic entry; `compaction/status` shows an indicator instead of an unexplained stall. Note the real replay volume: F-01's cloud session replayed **991 updates** on a single `session/load`, so replay performance is on the critical path, not a tail case.
 - **Depends on:** F-05. Build against fixtures from F-01.
 
-### F-13 · Prompt composer · `M` · 🟡 **PARTIAL** — send, cancel and steering copy done; image attachment is not
+### F-13 · Prompt composer · `M` · ✅ **DONE 2026-09-02**
 - **Do:** send prompts into a live session; attach images (the harness advertises `promptCapabilities.image` — on a phone this is a real differentiator: photograph a whiteboard, attach a failure screenshot); cancel an in-flight turn; queue a message while the agent is working to steer without cancelling.
-- **Done when:** `session/prompt` content is sent as a typed block **array**; cancel takes effect promptly; images round-trip.
+- **Done when:** `session/prompt` content is sent as a typed block **array**; cancel takes effect promptly; images round-trip. **Shipped 2026-09-02**: attach via the Android Photo Picker (`ActivityResultContracts.PickVisualMedia`, no new dependency, no runtime permission needed), local preview with remove, gated on `ConnectionState.supportsImages` threaded down from `MainActivity`.
 - **Depends on:** F-12.
 
-### F-14 · Permission / approval UI · `M` · 🟡 **PARTIAL** — approval card, agent-supplied options, cross-client resolution done; `_kiro/userInput` has a model and a gateway call but no UI
+### F-14 · Permission / approval UI · `M` · 🟡 **PARTIAL** — approval card, agent-supplied options, cross-client resolution, and `_kiro/userInput` UI done 2026-09-02; the "check for a pending approval before replay finishes" durable-state requirement is still unbuilt
 - **Do:** surface agent-initiated permission requests and answer them. On attach, **check for a pending approval before the transcript finishes replaying** — Kiro holds a request raised while no client was attached and presents it to the next client, so this is durable state, not a transient event.
 - **Render `options[]` as sent.** F-01 observed four (`allow_once`, `allow_always`, `reject_once`, `reject_always`) but the list is agent-supplied — key off `kind`, don't hard-code. `_meta.kiro.consent` gives the capability, the concrete resource, and whether the ask was implicit — enough to make a notification readable without opening the session.
 - **`pendingInteraction` / `interactionResolved` arrive in the stream.** Use them to render the waiting state, and to clear it when *another* client answers first.
-- **Also build `_kiro/userInput`.** It is a second, distinct channel: the agent asking a free-text question mid-turn. Undocumented, and the plan did not know about it.
-- **Done when:** an approval can be granted or denied from the phone and the agent proceeds; a pending approval is never silently buried below the scroll; a free-text agent question can be answered or dismissed.
+- **Also build `_kiro/userInput`.** It is a second, distinct channel: the agent asking a free-text question mid-turn. Undocumented, and the plan did not know about it. **Shipped 2026-09-02**: `UserInputCard` (free text, distinct from the fixed-option `ApprovalCard`), stacked with a pending approval rather than either silently dropping the other, plus a `FakeGateway.simulateUserInput` hook for testing without a real bridge.
+- **Done when:** an approval can be granted or denied from the phone and the agent proceeds; a pending approval is never silently buried below the scroll; a free-text agent question can be answered or dismissed. **Still open:** the pre-replay pending-approval check was not addressed by this round and applies to both channels, not just userInput.
 - **Depends on:** F-12. Payload shape is pinned by [`prompt-turn-with-permission.jsonl`](../core/src/test/resources/fixtures/prompt-turn-with-permission.jsonl).
 
-### F-15 · Connection lifecycle: foreground service, reconnect, replay · `L` · 🟡 **PARTIAL** — foreground service with `onTimeout`, jittered backoff and the bridge-side replay log done; the reconnect loop is not wired to connectivity callbacks
+### F-15 · Connection lifecycle: foreground service, reconnect, replay · `L` · 🟡 **PARTIAL** — foreground service (manifest-declared 2026-09-02, was silently missing before), jittered backoff wired to the live reconnect loop, connectivity-regained eager retry, and the bridge-side replay log done; `_bridge/resume` incremental replay is not
 The item that decides whether the app is trustworthy. A session that dies when the phone locks is a broken client regardless of how good the UI looks.
 
 - **Do:** a `dataSync` foreground service for active turns; exponential backoff with jitter; eager reconnect on connectivity-regained; a replay protocol — **check F-03's decision first**, since `_meta.kiro.messageId` may make the `lastSeq` scheme in [ACP-INTEGRATION §7](ACP-INTEGRATION.md#7-reconnect-and-replay--our-design-not-kiros) unnecessary; explicit handling of Android 15's 6h/24h `dataSync` cap including `onTimeout()`; Doze-aware behaviour.
 - **Answering an approval does not require the original connection.** KAS correlates permissions by `toolCallId` (`_kiro/permission/respond`), which is exactly the mobile case: notification arrives, socket has since dropped, user taps Allow on a fresh one.
 - **Also do — the degradation contract** from [ADR-005 §5.3](adr/ADR-005-bridge-hosting-and-availability.md#53-the-degradation-contract), which is acceptance criteria, not polish: render the session list from cache with a visible "last synced"; name the state ("bridge unreachable — last seen 3h ago", and say the machine is probably asleep when the only bridge is a workstation); disable create **with a reason**; select between paired bridges and refetch the transcript when the chosen bridge has no replay log for a session. **Never queue prompts for later delivery** — a prompt composed hours ago against unseen state, delivered unattended to an autonomous agent with repository write access, is the one failure mode worth designing out. Hold the draft; send it when the user is present.
-- **Done when:** backgrounding the app, locking the phone, flipping wifi→cellular, and killing the socket mid-turn all resume with **no gap and no duplicate entries**; log truncation past `lastSeq` triggers an honest full refetch rather than a silent hole; and every bridge-unreachable path shows a named state rather than a spinner.
+- **Done when:** backgrounding the app, locking the phone, flipping wifi→cellular, and killing the socket mid-turn all resume with **no gap and no duplicate entries**; log truncation past `lastSeq` triggers an honest full refetch rather than a silent hole; and every bridge-unreachable path shows a named state rather than a spinner. **Shipped 2026-09-02:** fixed a real bug where `SessionConnectionService` was never declared in `AndroidManifest.xml` (would have thrown at runtime on first use); wired the previously-unused `Backoff` class into the actual reconnect loop in `MainActivity`; `ConnectionState.Reconnecting` is now emitted (was defined with UI text but never emitted); added a `ConnectivityObserver` so a network-regained event interrupts the backoff wait instead of sitting it out — caught and fixed a real bug during live device testing where a freshly-registered `NetworkCallback` fires immediately on an already-up network, defeating backoff entirely. **Still open:** the app always does a full `session/load` on reconnect rather than calling the already-implemented `_bridge/resume {sessionId, afterMessageId}` for incremental replay — bigger, separately-scoped item.
 - **Depends on:** F-03, F-12.
 
 ### F-16 · Push notifications · `M`
@@ -258,7 +259,7 @@ F-02 ─► F-04 ─► F-05 ─┬─► F-10 ───────────
                                             F-19/20/21/23 ┘
 ```
 
-- **Status 2026-09-02:** F-02, F-03, F-04, F-05 and F-06 are done; F-07, F-10, F-11, F-12, F-13, F-14 and F-15 are partial (see each item). `./gradlew build` is green and the bridge has been driven end-to-end against a real `kiro-cli`.
+- **Status 2026-09-02:** F-02, F-03, F-04, F-05, F-06, F-10 and F-13 are done; F-07, F-11, F-12, F-14 and F-15 are partial (see each item). `./gradlew build` is green and the bridge has been driven end-to-end against a real `kiro-cli`. F-07/F-10/F-14's userInput slice/F-13/F-15's reconnect slice were all closed in one round against `FakeGateway` on a local emulator, each verified with real screenshots and logcat rather than asserted.
 - **The largest untested seam** is everything that needs a real cloud *turn*: F-11's create, F-14's approval round trip, and F-15's reconnect-mid-turn replay. All three cost credits to exercise and none of them has been.
 - **Start now, in parallel:** F-00, F-24, and F-01's A7–A17 follow-up. (A1–A6 and A18 are done — their fixtures and findings are ready.)
 - **Widest parallel band:** after F-05, the UI items (F-10, F-12, F-17, F-18) can all proceed against `FakeGateway` while F-03 and F-15 handle the hard infrastructure.
