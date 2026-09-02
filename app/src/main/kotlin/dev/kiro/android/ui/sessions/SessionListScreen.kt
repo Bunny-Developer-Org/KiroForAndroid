@@ -9,16 +9,29 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,12 +56,19 @@ import dev.kiro.core.session.ConnectionState
 @Composable
 fun SessionListScreen(
     sessions: List<CloudSession>,
+    pinnedIds: Set<String>,
     connection: ConnectionState,
     onOpen: (CloudSession) -> Unit,
     onNewSession: () -> Unit,
+    onDelete: (CloudSession) -> Unit,
+    onTogglePin: (CloudSession) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = KiroTheme.colors
+    // Confirmation is required (FEATURES F-10): held here, not in the caller, so
+    // every entry point into delete goes through one dialog rather than each row
+    // reimplementing the "are you sure" itself.
+    var pendingDelete by remember { mutableStateOf<CloudSession?>(null) }
 
     Column(modifier.fillMaxSize().background(colors.bg)) {
         ConnectionBanner(connection)
@@ -70,12 +90,56 @@ fun SessionListScreen(
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
                 items(sessions, key = { it.id }) { session ->
-                    SessionRow(session, onOpen)
+                    SessionRow(
+                        session = session,
+                        pinned = session.id in pinnedIds,
+                        onOpen = onOpen,
+                        onTogglePin = { onTogglePin(session) },
+                        onRequestDelete = { pendingDelete = session },
+                    )
                     HorizontalDivider(color = colors.border, thickness = 1.dp)
                 }
             }
         }
     }
+
+    pendingDelete?.let { session ->
+        DeleteSessionDialog(
+            session = session,
+            onConfirm = {
+                onDelete(session)
+                pendingDelete = null
+            },
+            onDismiss = { pendingDelete = null },
+        )
+    }
+}
+
+/**
+ * "Delete with confirmation" is the explicit acceptance bar (FEATURES F-10) —
+ * this is the one dialog that satisfies it, named after what it does rather than
+ * generically, since a session delete cannot be undone.
+ */
+@Composable
+private fun DeleteSessionDialog(
+    session: CloudSession,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val name = session.repositories.firstOrNull()?.name ?: session.title ?: session.id
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete session?") },
+        text = { Text("\"$name\" will be removed. This cannot be undone.") },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("Delete", color = KiroTheme.colors.danger)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }
 
 /**
@@ -127,7 +191,13 @@ private fun NewSessionAction(
 }
 
 @Composable
-private fun SessionRow(session: CloudSession, onOpen: (CloudSession) -> Unit) {
+private fun SessionRow(
+    session: CloudSession,
+    pinned: Boolean,
+    onOpen: (CloudSession) -> Unit,
+    onTogglePin: () -> Unit,
+    onRequestDelete: () -> Unit,
+) {
     val colors = KiroTheme.colors
     Column(
         Modifier
@@ -156,6 +226,25 @@ private fun SessionRow(session: CloudSession, onOpen: (CloudSession) -> Unit) {
                 style = MaterialTheme.typography.labelMedium.merge(TabularNumbers),
                 color = colors.muted,
             )
+
+            // Compact -- the row is still one tap target for open; these two are
+            // the only secondary affordances F-10 asks for (pin, delete-with-
+            // confirmation), so a kebab menu would hide the state (pinned or not)
+            // that the star is here to show at a glance.
+            IconButton(onClick = onTogglePin, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    imageVector = if (pinned) Icons.Filled.Star else Icons.Filled.StarBorder,
+                    contentDescription = if (pinned) "Unpin session" else "Pin session",
+                    tint = if (pinned) colors.accent else colors.muted,
+                )
+            }
+            IconButton(onClick = onRequestDelete, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    imageVector = Icons.Filled.Delete,
+                    contentDescription = "Delete session",
+                    tint = colors.muted,
+                )
+            }
         }
 
         // The two statuses on their own line rather than competing with the repo

@@ -20,6 +20,7 @@ import dev.kiro.android.ServiceLocator
 import dev.kiro.android.service.SessionConnectionService
 import dev.kiro.android.ui.create.CreateSessionScreen
 import dev.kiro.android.ui.sessions.SessionListScreen
+import dev.kiro.android.ui.sessions.SessionListViewModel
 import dev.kiro.android.ui.theme.KiroLayout
 import dev.kiro.android.ui.transcript.ApprovalCard
 import dev.kiro.android.ui.transcript.Composer
@@ -39,31 +40,29 @@ import kotlinx.coroutines.launch
 @Composable
 fun AppNavigation(gateway: CloudSessionGateway, connection: ConnectionState) {
     var screen by remember { mutableStateOf<Screen>(Screen.Sessions) }
-    var sessions by remember { mutableStateOf<List<CloudSession>>(emptyList()) }
-
-    LaunchedEffect(gateway, connection) {
-        sessions = runCatching { gateway.listSessions() }.getOrDefault(emptyList())
+    // Keyed on the gateway instance (not remembered across a bridge swap) so a
+    // fallback to FakeGateway after a disconnect starts its own roster rather
+    // than replaying a dead one's state -- the same key AppRoot already uses
+    // when it decides whether to reconnect.
+    val sessionListViewModel = remember(gateway) {
+        SessionListViewModel(gateway, ServiceLocator.pinnedSessions)
     }
-
-    // The roster pushes itself, so the list stays live without polling.
-    LaunchedEffect(gateway) {
-        gateway.rosterChanges.collect { change ->
-            sessions = (change.upserted + sessions)
-                .distinctBy { it.id }
-                .filterNot { it.id in change.deleted }
-        }
-    }
+    val sessions by sessionListViewModel.sessions.collectAsState()
+    val pinnedIds by sessionListViewModel.pinnedIds.collectAsState()
 
     when (val current = screen) {
         Screen.Sessions -> SessionListScreen(
             sessions = sessions,
+            pinnedIds = pinnedIds,
             connection = connection,
             onOpen = { screen = Screen.Transcript(it) },
             onNewSession = { screen = Screen.Create },
+            onDelete = { sessionListViewModel.delete(it.id) },
+            onTogglePin = { sessionListViewModel.togglePin(it.id) },
         )
 
         Screen.Create -> CreateScreenHost(gateway) { created ->
-            sessions = listOf(created) + sessions
+            sessionListViewModel.addCreated(created)
             screen = Screen.Transcript(created)
         }
 

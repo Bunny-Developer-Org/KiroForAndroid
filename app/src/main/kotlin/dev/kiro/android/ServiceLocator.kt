@@ -4,8 +4,10 @@ import android.content.Context
 import dev.kiro.android.platform.AndroidLogger
 import dev.kiro.android.platform.CustomTabBrowserLauncher
 import dev.kiro.android.platform.DataStoreBridgeRegistry
+import dev.kiro.android.platform.DataStorePinnedSessionStore
 import dev.kiro.android.platform.InMemoryDriftMetrics
 import dev.kiro.android.platform.KeystoreTokenStore
+import dev.kiro.android.platform.PinnedSessionStore
 import dev.kiro.android.platform.WebSocketAcpTransport
 import dev.kiro.core.acp.AcpClient
 import dev.kiro.core.auth.BridgeRegistry
@@ -37,6 +39,7 @@ object ServiceLocator {
 
     val tokenStore: TokenStore by lazy { KeystoreTokenStore(appContext) }
     val bridges: BridgeRegistry by lazy { DataStoreBridgeRegistry(appContext) }
+    val pinnedSessions: PinnedSessionStore by lazy { DataStorePinnedSessionStore(appContext) }
     val browser by lazy { CustomTabBrowserLauncher(appContext) }
 
     private var activeGateway: CloudSessionGateway? = null

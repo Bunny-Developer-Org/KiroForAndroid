@@ -8,13 +8,16 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dev.kiro.core.acp.AcpJson
 import dev.kiro.core.auth.BridgeRegistry
 import dev.kiro.core.auth.PairedBridge
 import dev.kiro.core.util.DriftMetrics
 import dev.kiro.core.util.Logger
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
@@ -23,6 +26,7 @@ import kotlinx.serialization.json.put
 import java.util.concurrent.atomic.AtomicLong
 
 private val Context.bridgeDataStore: DataStore<Preferences> by preferencesDataStore("kiro_bridges")
+private val Context.pinnedSessionsDataStore: DataStore<Preferences> by preferencesDataStore("kiro_pinned_sessions")
 
 class AndroidLogger(private val tag: String = "Kiro") : Logger {
     override fun debug(message: String) { Log.d(tag, message) }
@@ -143,4 +147,34 @@ class DataStoreBridgeRegistry(private val context: Context) : BridgeRegistry {
 
     private fun JsonObject.string(name: String): String? =
         (this[name] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
+}
+
+/**
+ * Which sessions the user has pinned.
+ *
+ * Purely a client convenience — F-10 confirmed there is no wire-level concept of
+ * a pinned session, so it lives here rather than as a field on [dev.kiro.core.model.CloudSession].
+ * An interface (rather than the DataStore implementation directly) is what lets
+ * [dev.kiro.android.ui.sessions.SessionListViewModel] be tested with a plain
+ * in-memory fake instead of a real DataStore.
+ */
+public interface PinnedSessionStore {
+    public val pinnedIds: Flow<Set<String>>
+    public suspend fun toggle(sessionId: String)
+}
+
+/** Same shape as [DataStoreBridgeRegistry]: one DataStore Preferences file, one key. */
+class DataStorePinnedSessionStore(private val context: Context) : PinnedSessionStore {
+
+    private val key = stringSetPreferencesKey("pinned_session_ids")
+
+    override val pinnedIds: Flow<Set<String>> =
+        context.pinnedSessionsDataStore.data.map { it[key] ?: emptySet() }
+
+    override suspend fun toggle(sessionId: String) {
+        context.pinnedSessionsDataStore.edit { prefs ->
+            val current = prefs[key] ?: emptySet()
+            prefs[key] = if (sessionId in current) current - sessionId else current + sessionId
+        }
+    }
 }
