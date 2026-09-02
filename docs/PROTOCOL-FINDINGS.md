@@ -195,6 +195,42 @@ It also **weakens the case for inventing our own `_bridge/…` sequence-number r
 
 ---
 
+## 4b. A18 — `KIRO_API_KEY` authenticates the ACP surface · **VERIFIED**
+
+**Run:** 2026-09-02 (second session) · same `kiro-cli 2.19.2` / KAS 0.52.1 host.
+
+KAS announces its selected auth mode on stderr at startup, which turns A18 from an inference into a one-line observation. Two runs of [`scripts/init-only.json`](../tools/acp-probe/scripts/init-only.json), identical except for the environment:
+
+| Run | KAS stderr |
+|---|---|
+| `kiro-cli acp --agent-engine v3 --auth-method cli` | `[INFO] Auth: --auth=acp-callback (host-mediated refresh via _kiro/auth/getAccessToken)` |
+| same, with `KIRO_API_KEY` set | `[INFO] Auth: KIRO_API_KEY env var (api_key)` |
+
+**(a) Yes.** The `acp` surface authenticates from `KIRO_API_KEY`. Note what the table also shows: **the env var takes precedence over the credential store even though `--auth-method cli` was passed explicitly.** `--auth-method` advertises exactly one possible value (`cli` — "Resolve access tokens for the v3 engine from the Kiro CLI credential store"), so there is no flag that *selects* API-key auth and none that *suppresses* it. Presence of the variable decides.
+
+**(b) Yes, as far as an invalid key can prove it.** `acp.remote_sessions.enabled {"endpoint":"https://app.kiro.dev"}` is logged under *both* modes, and a `session/list` with `sessionSource: "remote"` under a deliberately bogus key reached the service and was rejected *by it*:
+
+```json
+{"code":-32000,
+ "message":"Authentication required or access denied. (Request ID: …)",
+ "data":{"errorType":"UnauthorizedException","retryErrorType":"CLIENT_ERROR",
+         "faultKind":"serviceRejection","requestId":"…"}}
+```
+
+A server-issued `requestId` and `faultKind: "serviceRejection"` mean the key was carried to `app.kiro.dev` and refused there — not that auth was unconfigured locally. The cloud path is wired to the api_key mode. The single unproven step is that a *valid* key returns a session list, which needs a real key and a Pro plan.
+
+**Method caveat, stated plainly:** this was *not* run in a container with an empty `~/.kiro`, as F-01's brief specifies. That control was aimed at ruling out a cached-login fallback, and the stderr line rules it out more directly — mode selection is announced, and the remote call failed under the key rather than silently succeeding under the stored Google login. Someone with a real key should still do the container run before the bridge depends on this.
+
+### Two consequences
+
+**1. The pty is now optional, not mandatory.** [A6](#a6--login---use-device-flow-is-scriptable--partially-refuted) forces F-03 and F-08 to drive a provider-picker TUI over a pty. An API-key-provisioned bridge skips that path entirely: paste one key, no `kiro-cli login`, no TUI. F-03 should implement API-key provisioning **first** — it is a few lines — and treat pty login as the second, harder path it still owes F-08. This does not remove F-08: the key authenticates the *bridge host*, and the product requirement is that the *user* signs in from their phone through a browser. It removes pty login from the bridge's critical path, not from the backlog.
+
+**2. The `acp-callback` mode is confirmed as the default, which sharpens a question [AUTHENTICATION §7](AUTHENTICATION.md#7-open-questions) already had open.** That document spotted the `Auth: --auth=acp-callback (host-mediated refresh via _kiro/auth/getAccessToken)` line and inferred that refresh is delegated to whoever owns the token. The A18 runs confirm it is the default and show the alternative it is being selected *against*. The practical consequence for F-03: KAS does not read the credential store itself, it **calls back into the host process** for tokens and refreshes — so any bridge that considers speaking to KAS directly instead of supervising `kiro-cli` would inherit the obligation to serve `_kiro/auth/getAccessToken` itself. Don't; supervise the CLI, as [ADR-001 §3](adr/ADR-001-cloud-session-access.md) already requires. It also narrows open question 3 there: under an API key there is no refresh at all, so `TokenExpired` is a question about the OAuth path only.
+
+**3. Security note for F-03/F-06.** Because presence of the variable silently overrides the credential store, a bridge that forwards its own environment into the CLI child process can change which account a session runs as without anything in the UI reflecting it. F-03 must construct the child environment explicitly rather than inheriting `process.env` wholesale.
+
+---
+
 ## 5. Corrections to the documented protocol
 
 The [ACP page](https://kiro.dev/docs/cli/acp/) names four streaming update kinds. The real stream is larger and differently spelled.

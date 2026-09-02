@@ -176,9 +176,19 @@ ADR-001 §4 says the bridge requirement belongs on the first screen of onboardin
 | A15 | `kiro-cli` can be kept resident and signed in on a headless host across restarts without an interactive re-auth, and token refresh survives long idle periods | **High** — if the CLI needs periodic interactive re-auth, an always-on bridge silently stops working and Option B's whole premise is weaker than claimed. |
 | A16 | A single bridge host can supervise several concurrent cloud sessions (the preview cap is 10) within reasonable memory on small hardware | Medium — decides whether a Pi is a real recommendation or an aspirational one. |
 | A17 | `kiro-cli` installs and runs under Termux + `proot-distro` on `aarch64` | Low stakes, high upside — Option E's spike. A single "no" closes it. |
-| A18 | `kiro-cli acp --agent-engine v3` authenticates from `KIRO_API_KEY` alone, with no prior interactive `kiro-cli login`, **and** the resulting session reaches cloud sessions | Medium — a yes removes the pty-driven login from F-03/F-08 and largely dissolves A15. Added 2026-09-02; see [F-01's brief](../FEATURES.md#f-01--protocol-spike-verify-assumptions-capture-golden-fixtures) for how to run it and what it costs. |
+| A18 | `kiro-cli acp --agent-engine v3` authenticates from `KIRO_API_KEY` alone, with no prior interactive `kiro-cli login`, **and** the resulting session reaches cloud sessions | ✅ **VERIFIED 2026-09-02** — see [PROTOCOL-FINDINGS §4b](../PROTOCOL-FINDINGS.md#4b-a18--kiro_api_key-authenticates-the-acp-surface--verified). KAS announces its auth mode on stderr; the env var wins over the credential store *even when `--auth-method cli` is passed*, and the api_key path reaches `app.kiro.dev`. Unproven only in that a valid key was not available. |
 
-Add A13–A16 and A18 to F-01's brief; A17 is its own small spike and should not block anything.
+Add A13–A16 to F-01's brief; A17 is its own small spike and should not block anything. **A18 is closed.**
+
+### What A18's answer changes here
+
+Two paragraphs of this ADR are now weaker than they read.
+
+**§3's availability argument gets easier, not harder.** A15 asked whether a headless host stays signed in across restarts and long idle without interactive re-auth. Under API-key provisioning that question largely stops mattering: there is no refresh token to expire and no browser to re-open, just an environment variable the container already has. A15 is still worth answering for the OAuth-provisioned path, but it is no longer the load-bearing risk it was — an always-on bridge can now be provisioned in a way that has no interactive component *at all*.
+
+**The recommendation to run the bridge as a container gets sharper.** An image that takes one secret and needs no TTY is a materially different thing to ask someone to run than one that needs a terminal to complete a provider-picker TUI on first boot. F-03 should ship exactly that as the default path, with `docker run -e KIRO_API_KEY=… ` in the README, and keep pty login as the alternative for users who cannot generate a key.
+
+**The cost is real and belongs in the onboarding copy.** The key is long-lived with no documented scoping, TTL, or rotation, and it is Pro/Pro+/Pro Max/Power only, with admin-managed accounts needing generation enabled. §5.4's onboarding order should state which provisioning path the user is on and what it costs them, rather than presenting one and hiding the other.
 
 ### A14 has a shape, not just a yes/no
 

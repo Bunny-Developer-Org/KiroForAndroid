@@ -103,6 +103,33 @@ Both values are extractable, and **the verification URI already carries the user
 
 ---
 
+## 3b. Alternative for Auth-2 — API-key provisioning (verified 2026-09-02)
+
+[A18 is closed](PROTOCOL-FINDINGS.md#4b-a18--kiro_api_key-authenticates-the-acp-surface--verified): `kiro-cli acp --agent-engine v3` authenticates from a `KIRO_API_KEY` environment variable, that mode reaches cloud sessions, and it **overrides the credential store even when `--auth-method cli` is passed explicitly**. There is no flag to select it and none to suppress it — presence of the variable decides.
+
+This gives Auth-2 a second, much simpler shape:
+
+| | Device-flow relay (§3) | API key |
+|---|---|---|
+| Who signs in | The user, from the phone, in a browser | Whoever provisions the bridge, once, in Kiro's console |
+| Bridge needs a pty | **Yes** (provider-picker TUI, [A6](PROTOCOL-FINDINGS.md#a6--login---use-device-flow-is-scriptable--partially-refuted)) | No |
+| Re-auth over time | Token refresh, delegated to the CLI | None — the key is long-lived |
+| Credential lifetime | Bounded, refreshable, revocable per session | **Long-lived, no documented TTL, scoping, or rotation** |
+| Availability | Any Kiro account | Pro/Pro+/Pro Max/Power only; admin-managed accounts need generation enabled |
+
+**This does not replace §3, and saying so precisely matters.** The stated product requirement is that *the user* signs in with their Kiro account via a web link. An API key authenticates the **bridge host**; it says nothing about who is holding the phone. A bridge provisioned with a key and then paired to a phone has performed Auth-1 and skipped Auth-2's user-facing half entirely. That is acceptable when the person provisioning the bridge *is* the person holding the phone — which is the common case for a self-hosted bridge — and it is not acceptable as the only path, because it cannot express "sign in as me" to a bridge someone else set up.
+
+**So: both.** F-03 implements API-key provisioning first because it is a few lines and unblocks every downstream item without a pty. F-08 still owes the device-flow relay, and it remains the flow the onboarding presents to a user who is signing in rather than provisioning.
+
+### Requirements this adds
+
+- **The bridge must build its child environment explicitly.** Inheriting `process.env` into the `kiro-cli` child means a stray `KIRO_API_KEY` on the host silently changes which account sessions run as, with nothing in the app reflecting it. Construct the environment from a known set; pass the key only when the bridge was configured with one.
+- **The key is a secret of the same class as a device token.** It never leaves the bridge host, is never sent to the app, never appears in a pairing payload, and is redacted from every log and diagnostic bundle (F-20).
+- **The app must be able to say which mode its bridge is in.** "Signed in as you" and "running under a host API key" are different trust statements, and the settings screen should not blur them. The bridge reports its mode; the app displays it.
+- **`whoami` is not a reliable identity probe under a key.** With `KIRO_API_KEY` set, `whoami --format json` returned `{"accountType":"SocialGoogle","email":null}` on a host with a valid stored Google login — the email resolution takes a different branch. Do not use `whoami` to decide which mode is active; use the bridge's own configuration.
+
+---
+
 ## 4. Auth-1: pairing the app to the bridge
 
 The bridge is a WebSocket that can drive an agent with write access to the user's repositories. It must not be open.
