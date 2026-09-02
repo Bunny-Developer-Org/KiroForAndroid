@@ -41,7 +41,13 @@ The answer to the first is yes, cleanly. The answer to the second is no, not thr
 | Cloud sessions appear alongside local ones in `--list-sessions` and the `/sessions` picker, with columns for **environment** and **status** | [Session management](https://kiro.dev/docs/cli/chat/session-management/) |
 | The repository set is **fixed at creation** (the CLI may add more later with `/repo`); to work on different repositories, start a new session. **No branch can be chosen** when attaching — ask the agent to check one out once running | [Cloud sessions](https://kiro.dev/docs/cloud-sessions/) |
 
-> **Provenance note.** `kiro.dev` is not reachable from this environment's egress proxy, so the facts above were gathered from search-result summaries of those pages rather than by fetching them. They are consistent across several independent results, but **exact flag syntax has not been read verbatim** — in particular whether `--repo` takes a comma-separated list, a repeated flag, or both. F-01 must confirm against `kiro-cli --help` and correct this table.
+> **Source status — read this before trusting the table above.**
+>
+> `kiro.dev` is blocked by this environment's egress proxy (gateway 403 on CONNECT), so those pages were reached only through search-result *summaries*, never fetched. **No flag syntax above has been read verbatim.**
+>
+> Worse, the docs appear to lag the CLI. A snapshot of `docs/reference/cli-commands` mirrored into a public repo lists `--resume`, `--resume-picker`, `--list-sessions` and `--delete-session` for `chat` — and **no `--cloud`, `--repo`, `--resume-id`, or `acp`** — while user reports put the current CLI at **2.20.1** ([kirodotdev/Kiro#11127](https://github.com/kirodotdev/Kiro/issues/11127)) and cloud sessions at 2.17. That snapshot also gives one verbatim line worth keeping: `--list-sessions` is *"List all saved chat sessions **for the current directory**"*, which is the directory scoping §2.2 relies on.
+>
+> **`kiro-cli --help` is the tiebreaker, not the docs.** Where this ADR and the CLI disagree, the CLI wins and this ADR is wrong. F-01 must capture `kiro-cli --help`, `kiro-cli chat --help` and `kiro-cli acp --help` verbatim and correct §2.1 from them.
 
 ### 2.2 The model this implies
 
@@ -212,4 +218,4 @@ Add to F-01's deliverables: capture the real `--repo` syntax verbatim; run the c
 
 ---
 
-*External facts are cited inline and paraphrased. See the provenance note in §2.1 — these pages were read through search summaries, not fetched directly, and F-01 should spot-check them.*
+*External facts are cited inline and paraphrased. See the source-status note in §2.1 — kiro.dev was unreachable, nothing was read verbatim, and the docs appear to lag the CLI. Treat `kiro-cli --help` as authoritative over both the docs and this ADR.*

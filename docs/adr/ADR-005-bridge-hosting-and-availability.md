@@ -192,4 +192,4 @@ Add A13–A16 to F-01's brief; A17 is its own small spike and should not block a
 
 ---
 
-*External facts are cited inline and paraphrased. As in ADR-004, `kiro.dev` pages were read through search summaries rather than fetched directly; F-01 should spot-check them.*
+*External facts are cited inline and paraphrased. As in [ADR-004 §2.1](ADR-004-work-repo-selection.md#21-evidence), `kiro.dev` was unreachable and nothing was read verbatim; the docs also appear to lag the CLI by several minor versions. `kiro-cli --help` is authoritative over both.*
