@@ -75,7 +75,13 @@ Ask Kiro for a documented third-party API, or for the app to be sanctioned.
 
 - **Pro:** the only path to the phone-only experience Option A imagines, with a contract behind it.
 - **Con:** not in our control; unknown timeline; may never happen.
-- **Verdict:** **Pursue in parallel.** Cheap to do, and it is the thing that would change the architecture most. Concretely: open a request on `kirodotdev/Kiro` and ask on the Kiro Discord. Track as F-00.
+- **Verdict:** **Pursue in parallel.** Cheap to do, and it is the thing that would change the architecture most. Track as F-00.
+
+**Status, surveyed 2026-09-02.** Three requests for something close to this are open on `kirodotdev/Kiro` and none has been committed to: [#6099](https://github.com/kirodotdev/Kiro/issues/6099) (IDE remote control, 19 reactions, labelled `keep-open`), [#7993](https://github.com/kirodotdev/Kiro/issues/7993) (remote **CLI** sessions from web/mobile — closest to our brief, labelled `pending-maintainer-response`), and [#9460](https://github.com/kirodotdev/Kiro/issues/9460) (remote access to a running IDE session), where a maintainer replied on **2026-07-16** that it was added to the backlog for future consideration.
+
+Two things to read out of that. The maintainer reply is a **weaker signal than a commitment but a stronger one than silence**, which is what F-00 previously recorded — this option is not dead. But all three requests are about reaching a **local** session remotely; *none* asks for third-party API access to **cloud** sessions, which is what would actually retire Option B. That gap is F-00's real job.
+
+Note also that all three are periodically flagged as duplicates of each other by Kiro's automation and rescued by their authors, so demand is split three ways and never accumulates into a single number.
 
 ### Option D — Do nothing / wait for official Android
 
@@ -157,7 +163,7 @@ These were load-bearing and unverified when this ADR was written. They have sinc
 
 **A second:** much of what §3's topology assumed the bridge would build — WebSocket ACP transport, multi-client multiplexing, permission correlation across reconnects, pending-permission re-send on attach — already exists inside KAS. F-03's scope shrinks accordingly. See PROTOCOL-FINDINGS §4.
 
-Two later ADRs extend this list rather than starting their own: [ADR-004 §7](ADR-004-work-repo-selection.md#7-assumptions-to-verify--extends-adr-001-5-same-numbering) adds **A7–A12** (repository binding and enumeration) and [ADR-005 §7](ADR-005-bridge-hosting-and-availability.md#7-assumptions-to-verify--extends-adr-001-5-and-adr-004-7) adds **A13–A17** (bridge fungibility, durable approvals, headless CLI residency). The numbering is global on purpose — there is one list of things we do not yet know.
+Two later ADRs extend this list rather than starting their own: [ADR-004 §7](ADR-004-work-repo-selection.md#7-assumptions-to-verify--extends-adr-001-5-same-numbering) adds **A7–A12** (repository binding and enumeration) and [ADR-005 §7](ADR-005-bridge-hosting-and-availability.md#7-assumptions-to-verify--extends-adr-001-5-and-adr-004-7) adds **A13–A18** (bridge fungibility, durable approvals, headless CLI residency, and — added 2026-09-02 — whether `KIRO_API_KEY` authenticates an `acp` session at all). The numbering is global on purpose — there is one list of things we do not yet know.
 
 ---
 

@@ -53,6 +53,7 @@ One correction from F-01: the CLI asks **which provider** before it prints anyth
 |---|---|
 | **[docs/FEATURES.md](docs/FEATURES.md)** | **The backlog.** 25 work items in 5 phases, with acceptance criteria, dependencies, and a parallelisation graph. Start here to contribute. |
 | **[docs/PROTOCOL-FINDINGS.md](docs/PROTOCOL-FINDINGS.md)** | **What the protocol actually does**, from frames captured off a real `kiro-cli`. Corrects the published docs in several places. Read before writing protocol code. |
+| **[docs/PRIOR-ART.md](docs/PRIOR-ART.md)** | **What everyone else built, and why none of it reaches cloud sessions.** Three published projects surveyed; two ideas worth stealing, and one trap confirmed |
 | [docs/ACP-INTEGRATION.md](docs/ACP-INTEGRATION.md) | The protocol contract to implement — handshake, session lifecycle, streaming updates, extensions, reconnect/replay |
 | [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) | Sign-in design: device flow relayed through the app, bridge pairing, token storage, auth state machine |
 | [docs/VISUAL-LANGUAGE.md](docs/VISUAL-LANGUAGE.md) | **The look.** Colour tokens, type scale, shape, motion and per-screen hints, steered onto Kiro Crew's aesthetic rather than Kiro IDE's or Web's |
@@ -78,7 +79,9 @@ Pick an item from [FEATURES.md](docs/FEATURES.md) and read *How to pick up an it
 2. **[PROTOCOL-FINDINGS.md](docs/PROTOCOL-FINDINGS.md) supersedes the published protocol docs** wherever they disagree. It was written from captured frames; several things Kiro documents are wrong or incomplete.
 3. **`core/` stays Android-free**, and all UI goes through the `CloudSessionGateway` seam. CI is meant to enforce the former.
 
-The genuinely open questions right now: whether a cloud session can be created with its repositories bound **non-interactively** (ADR-004 A8), whether Kiro would sanction a third-party client at all (F-00), what this project may legitimately be called given it uses Kiro's name (F-23), and how much of the bridge (F-03) is left once you subtract what KAS already does.
+The genuinely open questions right now: whether a cloud session can be created with its repositories bound **non-interactively** (ADR-004 A8), whether `KIRO_API_KEY` authenticates an `acp` session and reaches cloud sessions (ADR-005 A18 — a yes would remove the pty-driven login from the bridge), whether Kiro would sanction a third-party client at all (F-00), what this project may legitimately be called given it uses Kiro's name (F-23), and how much of the bridge (F-03) is left once you subtract what KAS already does.
+
+Three other projects have tried to put Kiro on a phone. None of them reaches cloud sessions, none implements approvals, and none survives a reconnect — [PRIOR-ART.md](docs/PRIOR-ART.md) says why, and what is worth taking from them anyway.
 
 ---
 

@@ -2,7 +2,7 @@
 
 Real JSON-RPC frames captured from `kiro-cli 2.19.2` (KAS 0.52.1) on 2026-09-02, as the F-01 spike deliverable. The analysis that goes with them is [docs/PROTOCOL-FINDINGS.md](../../../../../docs/PROTOCOL-FINDINGS.md).
 
-These exist so [F-04](../../../../../docs/FEATURES.md#f-04--acp-protocol-layer-in-core-m-) can be tested against frames Kiro actually sent, not frames we imagined. If a test here starts failing after a CLI upgrade, that is the fixture doing its job: the protocol moved, and the docs say it may.
+These exist so [F-04](../../../../../docs/FEATURES.md#f-04--acp-protocol-layer-in-core--m-) can be tested against frames Kiro actually sent, not frames we imagined. If a test here starts failing after a CLI upgrade, that is the fixture doing its job: the protocol moved, and the docs say it may.
 
 ## Format
 

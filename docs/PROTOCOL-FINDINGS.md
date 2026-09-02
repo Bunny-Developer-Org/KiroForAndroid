@@ -2,7 +2,7 @@
 
 **Run:** 2026-09-02 · `kiro-cli 2.19.2` on Linux · KAS (Kiro Agent Server) `0.52.1` · account signed in via Google social login.
 
-This is the written report [F-01](FEATURES.md#f-01--protocol-spike-verify-assumptions-capture-golden-fixtures) asks for. It answers the six assumptions in [ADR-001 §5](adr/ADR-001-cloud-session-access.md#5-assumptions-to-verify-before-f-03-starts), records what the plan got wrong, and says what each correction implies.
+This is the written report [F-01](FEATURES.md#f-01--protocol-spike-verify-assumptions-capture-golden-fixtures) asks for. It answers the six assumptions in [ADR-001 §5](adr/ADR-001-cloud-session-access.md#5-assumptions--resolved-by-f-01-on-2026-09-02), records what the plan got wrong, and says what each correction implies.
 
 **Headline: the architecture survives, and it is cheaper than we costed it.** `kiro-cli acp` does reach cloud sessions — five of the six assumptions are verified. The one real correction is to sign-in (A6), which is *more* interactive than assumed, not less. The larger surprise is how much of what F-03 was scoped to build already exists inside KAS.
 
@@ -36,6 +36,8 @@ kiro-cli acp --agent-engine v3 --auth-method cli
 | Cloud sessions reachable | **no** | **yes** |
 
 A client that opens `kiro-cli acp` with default flags gets a local-only agent and would conclude — as the plan nearly did — that cloud sessions are unreachable over ACP. **Every downstream item must pass `--agent-engine v3 --auth-method cli`.**
+
+**This is not a hypothetical failure mode.** [`ajitnk-lab/kiro-acp-telegram-bot`](https://github.com/ajitnk-lab/kiro-acp-telegram-bot) is a working, published ACP client for `kiro-cli` — and it spawns `kiro-cli acp --trust-all-tools` with no engine flag. Its author built and shipped an entire product on the v2 surface without ever discovering the cloud path existed. That is independent external confirmation that the default is a trap a competent developer walks straight into, and it is the strongest argument for stating these flags first in every downstream brief. See [PRIOR-ART.md §1](PRIOR-ART.md#1-ajitnk-labkiro-acp-telegram-bot--stdio-acp-local-engine).
 
 Two flag interactions worth knowing: `--model` is rejected with `--agent-engine=v3` (set the model over ACP instead), and `--auth-method cli` keeps token resolution inside the CLI process, which is what lets the bridge stay credential-free.
 

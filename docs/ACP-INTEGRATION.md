@@ -44,6 +44,18 @@ Store the negotiated `protocolVersion`; refuse to proceed on a major mismatch wi
 
 A verbatim handshake is committed at [`initialize-v3.jsonl`](../core/src/test/resources/fixtures/initialize-v3.jsonl).
 
+### `authMethods` does **not** mean "not signed in"
+
+The `initialize` result may carry a non-empty `authMethods` array — e.g. `[{"id":"kiro-login","name":"Kiro Login","description":"Run 'kiro-cli login' in terminal to authenticate."}]` — **even when the CLI is fully authenticated**. Do not read it as an auth-state signal, and do not gate the session list or session creation on it being empty.
+
+This is a real trap with a real casualty: JetBrains' ACP client treated a non-empty array as unauthenticated, rendered a login button, and then called an `authenticate` method `kiro-cli` does not implement ([kirodotdev/Kiro#6603](https://github.com/kirodotdev/Kiro/issues/6603)). The thread is worth reading in full — a Kiro engineer notes the [ACP schema](https://agentclientprotocol.com/protocol/schema#param-auth-methods) is genuinely ambiguous about whether the field's presence implies login is required, and resolved it on 2026-04-01 with *"for now we'll just rescind authMethods when user is logged in."* JetBrains fixed their side in parallel.
+
+So the field's behaviour **has changed across CLI versions and may change again**, in both directions. Consequences for us:
+
+- **Derive auth state on the bridge**, from `kiro-cli whoami` (or a `login` attempt refusing because a session already exists — see [PROTOCOL-FINDINGS A6](PROTOCOL-FINDINGS.md#a6--login---use-device-flow-is-scriptable--partially-refuted)), and send it to the app as an explicit field. Never infer it from the handshake.
+- **Tolerate both shapes.** Present *and* absent must both parse and both proceed. Fixtures should cover both; the committed `initialize-v3.jsonl` is only one of them.
+- If the app ever surfaces "sign in" from the handshake alone, it will show a sign-in screen to an already-signed-in user — the exact JetBrains bug, on a smaller screen.
+
 ---
 
 ## 3. Session lifecycle

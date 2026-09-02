@@ -176,8 +176,19 @@ ADR-001 §4 says the bridge requirement belongs on the first screen of onboardin
 | A15 | `kiro-cli` can be kept resident and signed in on a headless host across restarts without an interactive re-auth, and token refresh survives long idle periods | **High** — if the CLI needs periodic interactive re-auth, an always-on bridge silently stops working and Option B's whole premise is weaker than claimed. |
 | A16 | A single bridge host can supervise several concurrent cloud sessions (the preview cap is 10) within reasonable memory on small hardware | Medium — decides whether a Pi is a real recommendation or an aspirational one. |
 | A17 | `kiro-cli` installs and runs under Termux + `proot-distro` on `aarch64` | Low stakes, high upside — Option E's spike. A single "no" closes it. |
+| A18 | `kiro-cli acp --agent-engine v3` authenticates from `KIRO_API_KEY` alone, with no prior interactive `kiro-cli login`, **and** the resulting session reaches cloud sessions | Medium — a yes removes the pty-driven login from F-03/F-08 and largely dissolves A15. Added 2026-09-02; see [F-01's brief](../FEATURES.md#f-01--protocol-spike-verify-assumptions-capture-golden-fixtures) for how to run it and what it costs. |
 
-Add A13–A16 to F-01's brief; A17 is its own small spike and should not block anything.
+Add A13–A16 and A18 to F-01's brief; A17 is its own small spike and should not block anything.
+
+### A14 has a shape, not just a yes/no
+
+A14 currently asks only whether a pending permission survives being un-attended. That is the necessary half. The sufficient half is *what the app shows when it re-presents one*, and there is a good externally-authored answer to steal: a commenter on [kirodotdev/Kiro#9460](https://github.com/kirodotdev/Kiro/issues/9460) (`rpelevin`, 2026-06-22) argues that a remote approval surface can be small but must be **exact**, and lists the minimum envelope before you let an agent continue from a phone —
+
+> session identity · tool or command identity · sanitized command/argument digest · workspace or target scope · risk reason · expiry · terminal outcome after the decision
+
+— with the decision **consumed once**, and **failing closed if the underlying action changed** while the user was away.
+
+That last clause is a design constraint this ADR had not written down, and it is the one with teeth: an approval card rendered from a snapshot, answered twenty minutes later, must not authorise a *different* action than the one displayed. Whether ACP gives us enough to enforce that — whether a permission request carries anything stable to bind the decision to, or whether we must bind on `_meta.kiro.messageId` ourselves — is part of what F-03 confirms on its first cloud turn. Treat the seven fields as acceptance criteria for the approval UI, and treat "the phone must not become a standing permission for whatever the agent asks next" as the principle behind them.
 
 ---
 

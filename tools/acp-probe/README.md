@@ -47,6 +47,6 @@ Redaction is pattern-based — repository names, emails, home paths, session tit
 
 ## What this is not
 
-A client. It has no reconnect logic, no state model, and no error handling worth the name. It is a listening device pointed at a documented local interface, and it should stay that small — the real client is [F-04](../../docs/FEATURES.md#f-04--acp-protocol-layer-in-core-m-).
+A client. It has no reconnect logic, no state model, and no error handling worth the name. It is a listening device pointed at a documented local interface, and it should stay that small — the real client is [F-04](../../docs/FEATURES.md#f-04--acp-protocol-layer-in-core--m-).
 
 It also only ever talks to `kiro-cli` on the local machine over stdio. Pointing anything here at a Kiro network endpoint would violate [ADR-001 §3](../../docs/adr/ADR-001-cloud-session-access.md#3-decision).
