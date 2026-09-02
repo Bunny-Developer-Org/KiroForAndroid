@@ -26,6 +26,7 @@ import dev.kiro.android.ui.transcript.ApprovalCard
 import dev.kiro.android.ui.transcript.Composer
 import dev.kiro.android.ui.transcript.TranscriptScreen
 import dev.kiro.android.ui.transcript.TranscriptViewModel
+import dev.kiro.android.ui.transcript.UserInputCard
 import dev.kiro.core.model.AgentMode
 import dev.kiro.core.model.CloudSession
 import dev.kiro.core.model.RepoCandidate
@@ -87,6 +88,7 @@ private fun TranscriptHost(
     val viewModel = remember(session.id) { TranscriptViewModel(gateway, session.id) }
     val state by viewModel.state.collectAsState()
     val permission by viewModel.permission.collectAsState()
+    val userInput by viewModel.userInput.collectAsState()
 
     LaunchedEffect(session.id) {
         // The foreground service is what keeps the socket alive across a screen
@@ -101,8 +103,12 @@ private fun TranscriptHost(
             TranscriptScreen(state, Modifier.fillMaxSize())
         }
 
-        // Above the composer, never below the fold: an approval the user cannot
-        // see is an agent that is blocked for no reason.
+        // Above the composer, never below the fold: an approval or question the
+        // user cannot see is an agent that is blocked for no reason. The two
+        // channels are not mutually exclusive -- an agent can raise a userInput
+        // question in one turn and a permission request in the next before either
+        // is answered -- so both render, stacked, rather than one silently
+        // dropping the other.
         permission?.let { request ->
             ApprovalCard(
                 approval = dev.kiro.core.session.TranscriptReducer.PendingApproval(
@@ -111,6 +117,17 @@ private fun TranscriptHost(
                     options = request.options,
                 ),
                 onRespond = viewModel::respondToPermission,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = KiroLayout.ScreenGutter, vertical = 8.dp),
+            )
+        }
+
+        userInput?.let { request ->
+            UserInputCard(
+                request = request,
+                onSubmit = viewModel::respondToUserInput,
+                onDismiss = { viewModel.respondToUserInput(null) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = KiroLayout.ScreenGutter, vertical = 8.dp),

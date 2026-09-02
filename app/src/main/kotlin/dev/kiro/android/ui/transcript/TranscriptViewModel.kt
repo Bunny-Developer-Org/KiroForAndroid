@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.kiro.core.acp.SessionUpdate
 import dev.kiro.core.model.PermissionRequest
+import dev.kiro.core.model.UserInputRequest
 import dev.kiro.core.session.CloudSessionGateway
 import dev.kiro.core.session.PromptBlock
 import dev.kiro.core.session.TranscriptReducer
@@ -48,6 +49,11 @@ class TranscriptViewModel(
      */
     val permission: StateFlow<PermissionRequest?> = _permission.asStateFlow()
 
+    private val _userInput = MutableStateFlow<UserInputRequest?>(null)
+
+    /** The free-text question currently owed an answer. See [permission]'s doc. */
+    val userInput: StateFlow<UserInputRequest?> = _userInput.asStateFlow()
+
     init {
         viewModelScope.launch {
             gateway.updates.collect { update ->
@@ -58,6 +64,12 @@ class TranscriptViewModel(
         viewModelScope.launch {
             gateway.permissionRequests.collect { request ->
                 if (request.sessionId == sessionId) _permission.value = request
+            }
+        }
+
+        viewModelScope.launch {
+            gateway.userInputRequests.collect { request ->
+                if (request.sessionId == sessionId) _userInput.value = request
             }
         }
 
@@ -89,6 +101,13 @@ class TranscriptViewModel(
             ) {
                 _permission.value = null
             }
+            // Same story for a userInput question -- it can be answered from
+            // another client too, correlated the same way.
+            if (update is SessionUpdate.InteractionResolved &&
+                _userInput.value?.toolCallId == update.toolCallId
+            ) {
+                _userInput.value = null
+            }
         }
         _state.value = next
     }
@@ -111,6 +130,21 @@ class TranscriptViewModel(
         _permission.value = null
         viewModelScope.launch {
             gateway.respondToPermission(sessionId, request.toolCallId, optionId)
+        }
+    }
+
+    /**
+     * Answers -- or dismisses -- a pending `_kiro/userInput` question.
+     *
+     * [answer] is null for a dismiss and a non-blank string for a real answer;
+     * mirrors [respondToPermission]'s optimistic clear-before-round-trip so the
+     * card cannot be actioned twice.
+     */
+    fun respondToUserInput(answer: String?) {
+        val request = _userInput.value ?: return
+        _userInput.value = null
+        viewModelScope.launch {
+            gateway.respondToUserInput(sessionId, request.toolCallId, answer)
         }
     }
 
