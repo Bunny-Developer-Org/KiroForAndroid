@@ -38,7 +38,11 @@ import dev.kiro.core.session.SessionLimitReachedException
 import kotlinx.coroutines.launch
 
 @Composable
-fun AppNavigation(gateway: CloudSessionGateway, connection: ConnectionState) {
+fun AppNavigation(
+    gateway: CloudSessionGateway,
+    connection: ConnectionState,
+    onManageBridges: () -> Unit = {},
+) {
     var screen by remember { mutableStateOf<Screen>(Screen.Sessions) }
     // Keyed on the gateway instance (not remembered across a bridge swap) so a
     // fallback to FakeGateway after a disconnect starts its own roster rather
@@ -59,6 +63,7 @@ fun AppNavigation(gateway: CloudSessionGateway, connection: ConnectionState) {
             onNewSession = { screen = Screen.Create },
             onDelete = { sessionListViewModel.delete(it.id) },
             onTogglePin = { sessionListViewModel.togglePin(it.id) },
+            onManageBridges = onManageBridges,
         )
 
         Screen.Create -> CreateScreenHost(gateway) { created ->
