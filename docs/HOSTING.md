@@ -444,10 +444,16 @@ this without owning a domain.
   With those in place the bridge starts, stays up, listens on loopback and
   prints its pairing banner — confirmed on a real VM. What is still
   unverified past that point is a phone actually completing a session.
-  `setup-tunnel.sh` is still unexercised: it was checked line-by-line
-  against real `cloudflared --help` output, but `tunnel login`/`create`/
-  `route dns` have never been invoked. Expect to debug a first real run of
-  that one too.
+  `setup-tunnel.sh` has now been run too, and it had a bug of its own:
+  `cloudflared tunnel list -o json` pretty-prints, so the field arrives as
+  `"id": "..."` with a space, and the script grepped for the space-less form.
+  Under `set -euo pipefail` the failing grep killed the script **silently, one
+  line after it had created a real tunnel**, with its own "could not resolve the
+  tunnel ID" message unreachable. Fixed, and the whole path is now verified:
+  `wss://bridge.bunnydeveloper.dev/acp` answers `101 Switching Protocols` from
+  Cloudflare's edge and the bridge logs the connection attempt in the same
+  second, with `cloudflared` running as a systemd unit on the VM and nothing
+  running on the developer's machine.
 - **`kiro-cli`'s installer is large.** Its own zip is ~600 MB compressed
   (~1 GB installed across `kiro-cli`, `kiro-cli-chat`, and `kiro-cli-term`),
   found by inspecting the real installer while writing this. That's the

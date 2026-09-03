@@ -56,7 +56,14 @@ else
   echo "    tunnel '$TUNNEL_NAME' already exists, skipping create"
 fi
 
-TUNNEL_ID="$(cloudflared tunnel list --name "$TUNNEL_NAME" -o json | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)"
+# `tr -d` first: cloudflared pretty-prints its JSON, so the field arrives as
+# `"id": "…"` with a space after the colon and the space-less pattern below
+# matches nothing. That was not a cosmetic bug — under `set -euo pipefail` the
+# failing grep killed this script silently, immediately after it had created a
+# real tunnel, and the friendly error underneath was unreachable. `|| true`
+# keeps that error reachable. Seen for real on 2026-09-03.
+TUNNEL_ID="$(cloudflared tunnel list --name "$TUNNEL_NAME" -o json 2>/dev/null \
+  | tr -d ' \n' | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)"
 if [ -z "$TUNNEL_ID" ]; then
   echo "Could not resolve the tunnel ID for '$TUNNEL_NAME'. Run 'cloudflared tunnel list' and check by hand." >&2
   exit 1

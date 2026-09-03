@@ -29,10 +29,13 @@ is awake. Use it to try the app out, not as an always-on setup.
 The one step that touches your own browser either way is the one-time
 `cloudflared tunnel login` below.
 
-**Not run against a real account while writing this.** `cloudflared` was
-available locally, which made it possible to check every flag below against
-real `--help` output, but `login`/`create`/`route dns` were never actually
-invoked against a Cloudflare account.
+**Run for real on 2026-09-03**, against a live Cloudflare account and a real
+zone, and fixed once as a result: the tunnel-ID lookup parsed `-o json` output
+that does not exist (cloudflared pretty-prints, so the space-less `"id":"..."`
+pattern matched nothing), and under `set -euo pipefail` that killed the script
+silently right after it had created a tunnel. The full path now works end to
+end - `login`, `create`, `route dns`, config, systemd unit, and a WebSocket
+handshake from the public internet reaching a loopback-bound bridge.
 
 ## Prerequisites
 
