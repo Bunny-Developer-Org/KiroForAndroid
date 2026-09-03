@@ -179,11 +179,13 @@ private fun TranscriptRow(entry: TranscriptEntry, modifier: Modifier = Modifier)
             )
         }
 
-        is TranscriptEntry.AgentMessage -> Text(
+        // Markdown, because the agent writes it: headings, bold, fences and
+        // links arrived on the wire as source text and were being rendered
+        // literally. Parsed with `streaming = false` -- this entry is committed,
+        // so an unterminated `**` here is a literal, not an open span.
+        is TranscriptEntry.AgentMessage -> MarkdownText(
             entry.text,
             modifier = modifier.fillMaxWidth(),
-            style = MaterialTheme.typography.bodyMedium,
-            color = KiroTheme.colors.text,
         )
 
         is TranscriptEntry.ToolCallEntry -> ToolBlock(entry.toolCall, modifier)
@@ -271,6 +273,10 @@ private fun ToolBlock(toolCall: ToolCall, modifier: Modifier = Modifier) {
  *
  * The live region announces politely and only here — announcing every token would
  * be worse than announcing nothing.
+ *
+ * `streaming = true` is the whole reason [MarkdownParser] takes that flag: this
+ * node is called on prefixes, so a delimiter whose partner has not arrived is
+ * read as open rather than drawn as literal punctuation that snaps a tick later.
  */
 @Composable
 private fun StreamingMessage(text: String, modifier: Modifier = Modifier) {
@@ -279,11 +285,10 @@ private fun StreamingMessage(text: String, modifier: Modifier = Modifier) {
         modifier.semantics { liveRegion = LiveRegionMode.Polite },
         verticalAlignment = Alignment.Bottom,
     ) {
-        Text(
+        MarkdownText(
             text,
             modifier = Modifier.weight(1f, fill = false),
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.text,
+            streaming = true,
         )
         Caret(colors.accent)
     }

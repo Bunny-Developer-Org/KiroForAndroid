@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -43,7 +44,20 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             KiroTheme {
-                Scaffold { innerPadding ->
+                // `contentWindowInsets = WindowInsets(0)` is load-bearing, not
+                // tidying. Scaffold's default content padding is already the
+                // system-bar insets, and `Modifier.padding(PaddingValues)` --
+                // unlike `safeDrawingPadding()` -- does not *consume* what it
+                // applies. So the pair below charged the same 24dp navigation
+                // bar and the same status bar twice, which is where the dead
+                // space under the composer came from: the whole app was inset
+                // twice, top and bottom, and the composer is simply the only
+                // surface with nothing beneath it to hide the second helping.
+                // One inset source wins; `safeDrawingPadding()` is it, because
+                // it also covers the cutout and the IME and consumes what it
+                // applies, so a descendant's own `imePadding()` correctly
+                // resolves to zero instead of stacking.
+                Scaffold(contentWindowInsets = WindowInsets(0, 0, 0, 0)) { innerPadding ->
                     Box(
                         Modifier
                             .fillMaxSize()
