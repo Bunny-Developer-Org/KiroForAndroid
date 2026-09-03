@@ -105,7 +105,50 @@ Both values are extractable, and **the verification URI already carries the user
 
 ## 3b. Alternative for Auth-2 — API-key provisioning (verified 2026-09-02)
 
-[A18 is closed](PROTOCOL-FINDINGS.md#4b-a18--kiro_api_key-authenticates-the-acp-surface--verified): `kiro-cli acp --agent-engine v3` authenticates from a `KIRO_API_KEY` environment variable, that mode reaches cloud sessions, and it **overrides the credential store even when `--auth-method cli` is passed explicitly**. There is no flag to select it and none to suppress it — presence of the variable decides.
+[A18 is closed](PROTOCOL-FINDINGS.md#4b-a18--kiro_api_key-authenticates-the-acp-surface--verified): `kiro-cli acp --agent-engine v3` authenticates from a `KIRO_API_KEY` environment variable, and it **overrides the credential store even when `--auth-method cli` is passed explicitly**. There is no flag to select it and none to suppress it — presence of the variable decides.
+
+> **⛔ REFUTED 2026-09-03 — `api_key` mode does NOT reach cloud sessions.** The
+> sentence "that mode reaches cloud sessions" was in this document until today
+> and it is wrong. Everything below about API-key provisioning being the
+> frictionless path should be read with that in mind.
+>
+> **How it was established.** A minimal ACP probe — spawn
+> `kiro-cli acp --agent-engine v3 --auth-method cli`, send `initialize`, then
+> `session/list` with `_meta.kiro = {sessionSource: "remote", listScope: "user"}`
+> — was run three ways in a row:
+>
+> | Run | stderr auth line | `session/list` |
+> |---|---|---|
+> | `KIRO_API_KEY` unset | `Auth: --auth=acp-callback` | **OK — 28 sessions** |
+> | pre-existing key | `Auth: KIRO_API_KEY env var (api_key)` | `UnauthorizedException` |
+> | **freshly minted key**, same Pro+ account | `Auth: KIRO_API_KEY env var (api_key)` | `UnauthorizedException` |
+>
+> `--auth-method cli` was passed identically in all three; the only variable was
+> the presence of the environment variable. `initialize` succeeded every time —
+> so the handshake authenticates and the *cloud-session surface* is what
+> rejects the identity. Reproduced independently through the full stack: the
+> Android app against a bridge on a real GCE VM got the same
+> `UnauthorizedException` / `faultKind: serviceRejection` for `session/list`,
+> `_kiro/sourceProviders/list` and `session/new` alike, while the same APK
+> against a locally-run bridge with no key worked immediately.
+>
+> **The plan is not the cause.** The account is Kiro Pro+, and its interactive
+> login succeeded against the same server seconds apart. The app's error text
+> blamed the plan, which sent the first diagnosis in the wrong direction
+> entirely.
+>
+> **What this does not prove.** Both keys came from the same account and the
+> same console, and no Kiro documentation was consulted. This is "observed on
+> this account, twice, with two keys", not a statement about every account or
+> about a documented guarantee.
+>
+> **Consequences.** F-03's "API-key provisioning first, because it is a few
+> lines and unblocks every downstream item" no longer holds — it unblocks
+> nothing that matters, because the app's entire purpose is cloud sessions.
+> The device-flow relay in §3 is not the nice-to-have second path; it is the
+> only path known to work. [`tools/deploy/gcp/`](../tools/deploy/gcp/)
+> provisions a bridge with a key and therefore produces a bridge that cannot
+> create sessions — see the note in [HOSTING.md](HOSTING.md).
 
 This gives Auth-2 a second, much simpler shape:
 
