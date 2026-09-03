@@ -58,10 +58,18 @@ import android.content.ContentResolver
 /**
  * The prompt composer.
  *
- * Insets are handled as **padding, not size** — `imePadding()` plus
- * `navigationBarsPadding()` is what keeps the send button above the gesture bar
- * when the keyboard is up, and it is the direct analogue of the `dvh` problem the
- * web version has.
+ * Insets are handled as **padding, not size** — the direct analogue of the `dvh`
+ * problem the web version has.
+ *
+ * `imePadding()` and `navigationBarsPadding()` below are a *declaration*, not an
+ * addition: `Modifier.windowInsetsPadding` consumes what it applies, so both
+ * resolve to zero while `MainActivity` still wraps the app in
+ * `safeDrawingPadding()`, and both start doing real work the moment a host stops
+ * insetting for this surface. Keeping them is what makes the composer correct in
+ * either arrangement. They are emphatically not what fixed the dead space under
+ * this bar — that was `MainActivity` applying the system-bar insets twice, once
+ * through `Scaffold`'s non-consuming content padding and once through
+ * `safeDrawingPadding()`.
  *
  * The send button is `accent` with **black** content, 48dp, and squared off at
  * 8dp. Not a pill: a pill-shaped filled button is the fastest way to make this
