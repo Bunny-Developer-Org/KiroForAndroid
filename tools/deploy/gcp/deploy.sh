@@ -1,18 +1,39 @@
 #!/usr/bin/env bash
-# Provisions a free-tier-eligible GCE VM and runs the bridge on it.
-# See tools/deploy/gcp/README.md and docs/HOSTING.md before running this.
+# Provisions a GCE VM (free-tier-eligible machine and disk) and runs the
+# bridge on it. Read tools/deploy/gcp/README.md and docs/HOSTING.md first.
 #
-# NOT RUN AGAINST A REAL PROJECT while writing this: verified against
-# `gcloud ... --help` output only. Read it before trusting it with a real
-# project, and expect to fix the first typo yourself.
+# Run against a real project for the first time on 2026-09-03. That run
+# provisioned the VM correctly and then failed at `systemctl enable`, because
+# this script used to wait only for SSH to answer — see the comment above the
+# startup-script wait below. Fixed. Everything past "the bridge process
+# starts" is still unverified.
+#
+# THIS IS NOT A $0 DEPLOYMENT. The machine type and disk sit inside Compute
+# Engine's Always Free allowance, but the VM also needs an outbound internet
+# path: startup-script.sh installs a JRE from packages.adoptium.net and
+# kiro-cli from cli.kiro.dev, and cloudflared (the Option B path) has to
+# reach Cloudflare's edge. A VM with neither an external address nor a Cloud
+# NAT gateway has no such path and cannot boot into a working state. So this
+# script attaches an ephemeral external IPv4 (~$3/month, NOT covered by the
+# free tier) rather than creating a Cloud NAT gateway (~$32/month for the
+# same outcome). Set EXTERNAL_IP=none if your subnet already has NAT.
+# docs/HOSTING.md §3 has the cost table and how approximate those rates are.
+#
+# KNOWN BROKEN as of 2026-09-03: the KIRO_API_KEY this script provisions is
+# rejected by Kiro's cloud-session surface, so the bridge it builds pairs with
+# the phone and then cannot create a session. Two keys from a Pro+ account,
+# same result; the same account's interactive login works. See
+# docs/AUTHENTICATION.md §3b. Fixing it means `kiro-cli login` on the VM with
+# KIRO_API_KEY unset — the variable wins over --auth-method cli whenever set.
 #
 # What this deliberately does NOT do: bind the bridge to a public address.
 # BridgeConfig.validate() refuses a non-loopback bind without a TLS
-# certificate, so the bridge stays on 127.0.0.1 here too. Reach it either
-# through an IAP-tunnelled SSH port-forward (this script sets up the
-# firewall rule for that) or, for reachability that doesn't need an open SSH
-# session, pair this VM with tools/deploy/cloudflare/ — that combination is
-# the one docs/HOSTING.md recommends.
+# certificate, so the bridge stays on 127.0.0.1 here too — the external
+# address exists for outbound traffic only, and no ingress rule is created
+# for the bridge's port. Reach it either through an IAP-tunnelled SSH
+# port-forward (this script sets up the firewall rule for that) or, for
+# reachability that doesn't need an open SSH session, pair this VM with
+# tools/deploy/cloudflare/ — the combination docs/HOSTING.md recommends.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -23,6 +44,7 @@ PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null || true)
 ZONE="${ZONE:-us-central1-a}"                 # us-central1/us-west1/us-east1 for Always Free
 INSTANCE_NAME="${INSTANCE_NAME:-kiro-bridge}"
 MACHINE_TYPE="${MACHINE_TYPE:-e2-micro}"      # changing this opts out of the free tier
+EXTERNAL_IP="${EXTERNAL_IP:-ephemeral}"       # 'none' only if the subnet has Cloud NAT
 BRIDGE_PORT="${KIRO_BRIDGE_PORT:-8765}"
 FIREWALL_RULE="${FIREWALL_RULE:-allow-iap-ssh-kiro-bridge}"
 
@@ -71,6 +93,25 @@ else
   echo "    $FIREWALL_RULE already exists, skipping"
 fi
 
+echo "==> outbound internet path"
+if [ "$EXTERNAL_IP" = "none" ]; then
+  ADDRESS_ARGS=(--no-address)
+  echo "    EXTERNAL_IP=none — creating the VM with no external address."
+  echo "    This only works if the subnet already has a Cloud NAT gateway."
+  echo "    Without one the VM cannot reach packages.adoptium.net or"
+  echo "    cli.kiro.dev and startup-script.sh will fail on first boot."
+else
+  # No --no-address: gcloud's default is an ephemeral external IPv4.
+  ADDRESS_ARGS=()
+  echo "    attaching an ephemeral external IPv4 (~\$3/month, not free-tier)."
+  echo "    It is there so the VM can reach the internet outbound; no ingress"
+  echo "    rule is created for the bridge, which stays bound to loopback."
+  echo "    NOTE: on the 'default' VPC, GCP's own default-allow-ssh rule"
+  echo "    permits tcp:22 from 0.0.0.0/0 to any instance with an external"
+  echo "    address. Narrow or remove that rule if you don't want it."
+  echo "    Set EXTERNAL_IP=none instead if the subnet already has Cloud NAT."
+fi
+
 echo "==> instance"
 if gcloud compute instances describe "$INSTANCE_NAME" --zone="$ZONE" --project="$PROJECT_ID" >/dev/null 2>&1; then
   echo "    $INSTANCE_NAME already exists, skipping create (delete it first to re-provision)"
@@ -87,7 +128,7 @@ else
     --image-project=debian-cloud \
     --boot-disk-size=30GB \
     --boot-disk-type=pd-standard \
-    --no-address \
+    ${ADDRESS_ARGS[@]+"${ADDRESS_ARGS[@]}"} \
     --tags=kiro-bridge \
     --metadata-from-file="startup-script=$SCRIPT_DIR/startup-script.sh,kiro-api-key=$KEY_FILE"
 
@@ -103,6 +144,31 @@ for _ in $(seq 1 30); do
   fi
   sleep 10
 done
+
+# SSH answering does NOT mean the VM is ready: sshd comes up long before
+# google-startup-scripts.service has finished installing the JRE, kiro-cli
+# (~1 GB) and — the part that matters here — /etc/systemd/system/
+# kiro-bridge.service. Racing it produces exactly one symptom, seen for real
+# on 2026-09-03: "Failed to enable unit: Unit file kiro-bridge.service does
+# not exist." So wait for the unit itself, and surface the startup log if it
+# never shows up rather than failing with that riddle.
+echo "==> waiting for the startup script to finish (installs a JRE and ~1 GB of kiro-cli)"
+STARTUP_OK=0
+for _ in $(seq 1 60); do
+  if gcloud compute ssh "$INSTANCE_NAME" --zone="$ZONE" --project="$PROJECT_ID" \
+       --tunnel-through-iap --command="test -f /etc/systemd/system/kiro-bridge.service" \
+       >/dev/null 2>&1; then
+    STARTUP_OK=1
+    break
+  fi
+  sleep 15
+done
+if [ "$STARTUP_OK" -ne 1 ]; then
+  echo "The startup script never produced kiro-bridge.service. Its log:" >&2
+  gcloud compute ssh "$INSTANCE_NAME" --zone="$ZONE" --project="$PROJECT_ID" \
+    --tunnel-through-iap --command="sudo tail -30 /var/log/kiro-bridge-startup.log" >&2 || true
+  exit 1
+fi
 
 echo "==> copying the built bridge onto the VM"
 gcloud compute scp --recurse --zone="$ZONE" --project="$PROJECT_ID" --tunnel-through-iap \

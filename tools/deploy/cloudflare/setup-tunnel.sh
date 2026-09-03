@@ -6,6 +6,13 @@
 # an always-on process that spawns kiro-cli, and why Tunnel is the honest
 # Cloudflare answer instead.
 #
+# WHERE TO RUN THIS: on the same host as the bridge. For the recommended
+# all-cloud setup (docs/HOSTING.md "shape A") that host is the GCE VM from
+# tools/deploy/gcp/ — SSH in and run it there, so cloudflared ends up running
+# on the VM and nothing stays running on your own computer. Running it on
+# your laptop next to a local bridge is the mixed shape C instead: same
+# commands, $0/month, but reachable only while that laptop is awake.
+#
 # NOT RUN AGAINST A REAL ACCOUNT while writing this: `cloudflared` happens to
 # be installed on the machine that authored this script, which made it
 # possible to check every flag below against real `--help` output, but

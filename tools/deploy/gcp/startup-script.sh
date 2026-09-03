@@ -55,8 +55,17 @@ install -d -o bridge -g bridge -m 0700 /home/bridge/.kiro-bridge
 # under /home/bridge/.local/bin — where BridgeConfig's default
 # `kiro-cli` (resolved via PATH) will find it once the systemd unit sets
 # PATH accordingly. --force skips the "replace existing install?" prompt.
+#
+# NOT `runuser -l bridge`: -l starts a *login shell*, and the bridge user's
+# shell is deliberately /usr/sbin/nologin, so that form dies with "This
+# account is currently not available" — and, under `set -e`, takes the whole
+# startup script down with it before the systemd unit is ever written.
+# Verified the hard way on a real VM, 2026-09-03. `runuser -u ... --` runs
+# the command directly instead of through the account's shell, so nologin
+# stays intact; HOME is set explicitly because that is what -l was providing.
 if [ ! -x /home/bridge/.local/bin/kiro-cli ]; then
-  runuser -l bridge -c 'curl -fsSL https://cli.kiro.dev/install | bash -s -- --force'
+  runuser -u bridge -- env HOME=/home/bridge \
+    bash -c 'curl -fsSL https://cli.kiro.dev/install | bash -s -- --force'
 fi
 
 # --- 5. The secret: KIRO_API_KEY from instance metadata ---------------------
@@ -77,6 +86,11 @@ curl -sf -H "Metadata-Flavor: Google" \
 rm -f /etc/kiro-bridge.env.tmp
 chown root:bridge /etc/kiro-bridge.env
 chmod 640 /etc/kiro-bridge.env
+# Put the umask back: without this, the tight 077 above leaks into step 6 and
+# the systemd unit lands 0600 root:root. systemd still reads it (it is root),
+# so this is untidiness rather than breakage — but it makes the unit invisible
+# to `grep` for anyone debugging without sudo, which cost time on 2026-09-03.
+umask 022
 
 # --- 6. systemd unit ---------------------------------------------------------
 # Not started here — /opt/kiro-bridge/bin/bridge does not exist yet.
@@ -102,10 +116,49 @@ RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=/home/bridge
+# PrivateTmp is load-bearing, not hardening garnish. BridgeConfig defaults
+# workingDirectory to \$java.io.tmpdir/kiro-bridge-workspace and CliSupervisor
+# mkdirs() it — but ProtectSystem=strict makes /tmp read-only unless it is
+# listed in ReadWritePaths, so that mkdirs() silently returns false and the
+# spawn of kiro-cli then dies with a thoroughly misleading
+#   Cannot run program "kiro-cli" ... Exec failed, error: 2
+# which reads as "the binary is missing" when the binary is fine and it is the
+# *working directory* that does not exist. Seen for real on 2026-09-03.
+# PrivateTmp gives the service its own writable /tmp; the workspace is meant
+# to be scratch space, so losing it on restart is correct behaviour.
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
+
+# --- 7. cloudflared: installed, but neither configured nor started ----------
+# The all-cloud shape in docs/HOSTING.md runs cloudflared on THIS VM, next to
+# the bridge, so that nothing has to keep running on your own computer. That
+# needs the binary present here. It does not need it configured — that is
+# tools/deploy/cloudflare/setup-tunnel.sh, run later and interactively,
+# because `cloudflared tunnel login` has to authenticate against your own
+# Cloudflare account.
+#
+# /usr/local/bin is not a free choice: it is the path already hardcoded in
+# tools/deploy/cloudflare/cloudflared.service. The URL below is Cloudflare's
+# documented direct-binary download, and it was confirmed working on a real
+# VM on 2026-09-03. A failure stays non-fatal on purpose: the IAP/SSH path
+# does not need cloudflared at all.
+if ! id cloudflared >/dev/null 2>&1; then
+  useradd --create-home --shell /usr/sbin/nologin cloudflared
+fi
+if [ ! -x /usr/local/bin/cloudflared ]; then
+  if curl -fsSL -o /usr/local/bin/cloudflared.tmp \
+       https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64; then
+    chmod 0755 /usr/local/bin/cloudflared.tmp
+    mv /usr/local/bin/cloudflared.tmp /usr/local/bin/cloudflared
+  else
+    rm -f /usr/local/bin/cloudflared.tmp
+    echo "WARNING: could not download cloudflared. The IAP/SSH path is unaffected;"
+    echo "         install it by hand before using the Cloudflare Tunnel path."
+  fi
+fi
 
 echo "=== startup script done: $(date -u --iso-8601=seconds) ==="
