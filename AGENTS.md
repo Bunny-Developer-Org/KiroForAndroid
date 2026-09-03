@@ -74,13 +74,13 @@ Commands, in the order CI runs them:
 ```bash
 ./gradlew :core:corePurityCheck      # the one hard rule, checked first (§5)
 ./gradlew detekt                     # static analysis + ktlint formatting rules, maxIssues: 0
-./gradlew :core:test :bridge:test    # JVM unit tests
+./gradlew :core:test :bridge:test :app:testDebugUnitTest   # JVM + Robolectric-free unit tests
 ./gradlew :app:assembleDebug :bridge:installDist
 ```
 
 **Verified here:** `./gradlew projects --offline` and `./gradlew :core:corePurityCheck :core:test :bridge:test --offline` both succeed on this machine (Temurin 21.0.6, ~2 s warm, all tasks `UP-TO-DATE`). Gradle prints a Gradle-10 deprecation warning; harmless today.
 
-`app/` has unit tests too ([8 files under `app/src/test/`](app/src/test/kotlin/dev/kiro/android/)) but **CI does not run them** — `ci.yml` only runs `:core:test :bridge:test`. Run `./gradlew :app:testDebugUnitTest` yourself when you change `app/`.
+`app/` has unit tests too ([under `app/src/test/`](app/src/test/kotlin/dev/kiro/android/)) and, as of the `unit-tests-github-actions` change, **CI runs them**: `ci.yml`'s "Unit tests" step runs `:core:test :bridge:test :app:testDebugUnitTest`. Run `./gradlew :app:testDebugUnitTest` locally when you change `app/`.
 
 **Android SDK:** `:app:assembleDebug` needs one. `:bridge:installDist` does **not** — [`bridge/Dockerfile`](bridge/Dockerfile) states this was verified locally with `ANDROID_HOME` unset, and [`docs/HOSTING.md`](docs/HOSTING.md) repeats it. *I did not re-verify this myself* (this machine has a valid `local.properties` pointing at an SDK, so the test would have been meaningless without perturbing the working tree). Note the accompanying caveat, which is real: configure-on-demand is off, so Gradle still *configures* `:app`; only configuration, not the SDK, is required.
 
