@@ -16,6 +16,26 @@ public object AcpMethods {
     public const val SESSION_PROMPT: String = "session/prompt"
     public const val SESSION_CANCEL: String = "session/cancel"
     public const val SESSION_SET_MODE: String = "session/set_mode"
+
+    /**
+     * How the model is actually changed.
+     *
+     * `{sessionId, configId: "model", value: "<modelId>"}` → `{configOptions: [...]}`,
+     * and KAS also broadcasts the new set as a `config_option_update`. For a cloud
+     * session the agent forwards this verb to the sandbox, so it is the one call
+     * that works in both placements (PROTOCOL-FINDINGS §4d).
+     */
+    public const val SESSION_SET_CONFIG_OPTION: String = "session/set_config_option"
+
+    /**
+     * The ACP-standard model setter, which **KAS 0.52.1 does not implement.**
+     *
+     * The ACP dispatcher routes `session/set_model` to `agent.unstable_setSessionModel`
+     * and answers `-32601 method not found` when the agent has no such member;
+     * reading the shipped `@kiro/agent` bundle on 2026-09-03 found the name only in
+     * that dispatcher, never on `KiroAgent`. Kept as a fallback for an agent that
+     * does implement it — see [SESSION_SET_CONFIG_OPTION] for the path that works.
+     */
     public const val SESSION_SET_MODEL: String = "session/set_model"
 
     /** Agent → client. The one server-initiated request the client must answer. */

@@ -197,7 +197,9 @@ It also **weakens the case for inventing our own `_bridge/…` sequence-number r
 
 ---
 
-## 4b. A18 — `KIRO_API_KEY` authenticates the ACP surface · **VERIFIED**
+## 4b. A18 — `KIRO_API_KEY` authenticates the ACP surface · **VERIFIED, then narrowed 2026-09-03**
+
+> **⚠ Scope correction, 2026-09-03.** The heading below is true of the *handshake* and not of the cloud-session surface. Under `KIRO_API_KEY`, `initialize` succeeds and `session/list` with `sessionSource: "remote"` is rejected by the service. §4b's claim that "that mode reaches cloud sessions" (§3b of [AUTHENTICATION.md](AUTHENTICATION.md#3b-alternative-for-auth-2--api-key-provisioning-verified-2026-09-02) repeats it) is **not supported by the evidence below and is contradicted by the run in [§4b-i](#4b-i-the-api-key-mode-does-not-reach-cloud-sessions-on-this-account--observed-twice-2026-09-03)**. The original finding is left intact; read it with that limit.
 
 **Run:** 2026-09-02 (second session) · same `kiro-cli 2.19.2` / KAS 0.52.1 host.
 
@@ -230,6 +232,27 @@ A server-issued `requestId` and `faultKind: "serviceRejection"` mean the key was
 **2. The `acp-callback` mode is confirmed as the default, which sharpens a question [AUTHENTICATION §7](AUTHENTICATION.md#7-open-questions) already had open.** That document spotted the `Auth: --auth=acp-callback (host-mediated refresh via _kiro/auth/getAccessToken)` line and inferred that refresh is delegated to whoever owns the token. The A18 runs confirm it is the default and show the alternative it is being selected *against*. The practical consequence for F-03: KAS does not read the credential store itself, it **calls back into the host process** for tokens and refreshes — so any bridge that considers speaking to KAS directly instead of supervising `kiro-cli` would inherit the obligation to serve `_kiro/auth/getAccessToken` itself. Don't; supervise the CLI, as [ADR-001 §3](adr/ADR-001-cloud-session-access.md) already requires. It also narrows open question 3 there: under an API key there is no refresh at all, so `TokenExpired` is a question about the OAuth path only.
 
 **3. Security note for F-03/F-06.** Because presence of the variable silently overrides the credential store, a bridge that forwards its own environment into the CLI child process can change which account a session runs as without anything in the UI reflecting it. F-03 must construct the child environment explicitly rather than inheriting `process.env` wholesale.
+
+---
+
+## 4b-i. The `api_key` mode does **not** reach cloud sessions on this account · **OBSERVED TWICE, 2026-09-03**
+
+**Run:** 2026-09-03 · same host · a minimal ACP probe (spawn `kiro-cli acp --agent-engine v3 --auth-method cli`, `initialize`, then `session/list` with `_meta.kiro = {sessionSource: "remote", listScope: "user"}`), run three ways whose **only** difference was the environment.
+
+| Run | KAS stderr | `session/list` (remote, user) |
+|---|---|---|
+| `KIRO_API_KEY` unset | `Auth: --auth=acp-callback` | **28 sessions** |
+| the pre-existing key | `Auth: KIRO_API_KEY env var (api_key)` | `-32000` · `UnauthorizedException` · `faultKind: serviceRejection` |
+| a **freshly minted** key, same Kiro Pro+ account | `Auth: KIRO_API_KEY env var (api_key)` | same rejection (request id `070722ee-0646-408b-8644-2407e3430beb`) |
+
+Two things this establishes:
+
+1. **`initialize` succeeding under `api_key` says nothing about the cloud surface.** The handshake completed in every run. It is `session/list` — and, in the earlier app-level run, `_kiro/sourceProviders/list` and `session/new` — that the service refuses.
+2. **The account's plan is not the cause.** It is Kiro Pro+, and the same account's interactive login worked against the same server seconds apart. This is what closes the "(a) the key was not entitled" limb of AUTHENTICATION §3b's contradiction: a second, freshly minted key from that same account failed identically.
+
+**The boundary, stated plainly:** both keys came from one account's console, and no Kiro documentation was consulted. This is "observed on this account, twice, with two keys" — not "API keys never reach cloud sessions". Someone with a key on a different account should still try it before this is written as a general rule.
+
+**Consequences.** F-03's "implement API-key provisioning first" ordering (§4b, consequence 1) is now the wrong default for anything that needs cloud sessions — an API-key bridge gets a working handshake and an empty, erroring app. And the app's own copy had to change: `BridgeGateway`'s unauthorized message used to read *"This Kiro account cannot create cloud sessions. Cloud sessions need a Pro plan or higher…"*, which is precisely the misdiagnosis this run refutes. It now leads with the bridge's auth mode when that is known to be `API_KEY`, and never asserts the plan is at fault.
 
 ---
 
@@ -278,6 +301,84 @@ error, same as before this investigation started. Only `session/new` tightened.
 "no meaningful working directory" conclusion still holds — this is a protocol
 validation quirk on `session/new`, not a reason to believe cwd carries meaning
 for a cloud session. See `BridgeGateway.kt` for the code-level comment.
+
+---
+
+## 4d. Models: where the list lives, and how the model is actually changed · **VERIFIED 2026-09-03**
+
+**Method:** fixture frames captured by F-01 (`prompt-turn-with-permission.jsonl`), cross-checked against the shipped `@kiro/agent` bundle at `~/.local/share/kiro-cli/kas/2.19.2-…/node_modules/@kiro/agent/dist/server/acp-server.js` — the same local, user-installed surface §1 reads — and against `kiro-cli chat --list-models`. **Not** exercised against a live cloud session: no credits were spent, so the wire shapes are read from a real capture and from KAS's own dispatch code rather than observed end to end on the cloud path. The two disagree nowhere.
+
+### There is no way to list models without a session
+
+The handshake enumerates 24 extension methods and none of them is a model catalog; grepping every `_kiro/…` string in the bundle finds no model endpoint either. The list arrives **only** as a session's `configOptions`, so a "pick a model before you create the session" UI has nothing to read on a cold start.
+
+### The list is a `configOptions` entry, not ACP's `models` block
+
+Recent ACP versions put `models: {availableModels, currentModelId}` on the new-session result. **Kiro does not send that.** It sends `modes` (which it does spell ACP's way) plus a `configOptions` array of selects, of which one is the model:
+
+```jsonc
+{ "id": "model", "name": "Model", "category": "model", "currentValue": "auto",
+  "options": [
+    { "value": "auto", "name": "Auto", "description": "Models chosen by task…",
+      "_meta": { "kiro": { "rateMultiplier": 1, "rateUnit": "Credit", "hasEffort": false } } },
+    { "value": "claude-opus-5", "name": "Claude Opus 5", "description": "…1M context window",
+      "_meta": { "kiro": { "rateMultiplier": 2.2, "rateUnit": "Credit", "hasEffort": true,
+                           "effortLevels": ["low","medium","high","xhigh","max"],
+                           "defaultEffortLevel": "high" } } } ] }
+```
+
+19 models in the capture, ids identical to `kiro-cli chat --list-models` (`auto`, `claude-opus-5`, `gpt-5.6-luna`, `qwen3-coder-next`, …) and multipliers identical too. `rateMultiplier`/`rateUnit` are the **only** pricing signal the protocol carries, and they are optional — a missing block must render as "no figure", never as free.
+
+### A cloud session gets them on a different channel from a local one
+
+| | local session | cloud session |
+|---|---|---|
+| `session/new` result | `{_meta, sessionId, modes, configOptions}` | **`{_meta, sessionId}`** |
+| `session/load` result | `{_meta, modes, configOptions}` | **`{_meta}`** |
+| `config_option_update` | yes | **yes — the only source** |
+
+KAS's own comment on `buildRelayedLoadResponse` says why: it "omits `modes` / `configOptions` (the sandbox owns the agent surface and pushes it over `config_option_update`)". So between attaching to a cloud session and the sandbox's first push, **the client genuinely does not know the model**, and that gap has to be a rendered state rather than an empty picker.
+
+### `session/set_model` is not implemented — use `session/set_config_option`
+
+The ACP library's dispatcher routes `session/set_model` to `agent.unstable_setSessionModel` and throws `RequestError.methodNotFound` when the agent has no such member. In the whole 23 MB bundle that name occurs exactly twice, both inside that dispatcher: **`KiroAgent` does not define it.** `setSessionConfigOption` and `setSessionMode`, by contrast, are defined and telemetry-decorated.
+
+```jsonc
+// client -> agent
+{ "method": "session/set_config_option",
+  "params": { "sessionId": "…", "configId": "model", "value": "claude-opus-5" } }
+// agent -> client
+{ "result": { "configOptions": [ … the full authoritative set … ] } }
+```
+
+KAS also broadcasts the same set as a `config_option_update`, and for a **relayed (cloud) session it forwards the verb to the sandbox** — so this one call works in both placements. The config ids are declared in the bundle as `model`, `mode`, `autopilot`, `contentCollection`, `effortLevel`.
+
+**Fixed in `core/`:** `BridgeGateway.setModel()` now sends `session/set_config_option`, falls back to `session/set_model` only on `-32601`, and takes the resulting current model from the response rather than from the request.
+
+### Two smaller corrections `session/new` needed
+
+- **The mode was being sent where nothing reads it.** `createSession()` sent a top-level `agentMode`; KAS resolves the mode from `_meta.kiro.modeId` (`const modeId = kiroMeta?.modeId ?? "vibe"`, and the cloud path's `requestedModeId` likewise). Every cloud session this app created therefore ran `vibe` regardless of what was chosen. `_meta.kiro.modeId` is now sent as well.
+- **`_meta.kiro.modelId` is accepted by the schema but dropped on the cloud path.** `newRemoteSession` forwards only `workspacePaths`, `agentMode`, `executionTarget`, `repositories` and `repositoryBranches` to the backend create. A requested model has to be applied as a second `set_config_option` call after the session exists — which `createSession()` now does, best-effort, without failing the create.
+
+---
+
+## 4e. Archived sessions are **not** exposed over ACP · **ESTABLISHED 2026-09-03 — no code written**
+
+F-25 item 6 reports the session list showing sessions the user has archived. The concept does not exist in this codebase (`grep -rni archiv` over `core/src/main` and `app/src/main` finds nothing) — and it does not exist in what the protocol hands us either. Read from the same `@kiro/agent` bundle and from `session-list-remote.jsonl` (58 rows across two scopes):
+
+1. **The ACP row has no archive field.** `buildSessionInfoRow` projects exactly `sessionId`, `cwd`, `title`, `updatedAt`, optional `additionalDirectories`, and `_meta.kiro.{agentMode, createdAt, source, executionTarget, status, parentSessionId?, description?, repositories?, instanceStatus?}`, merged over any persisted `_meta`. Nothing else can reach the client.
+2. **`session/list` has no archive filter.** The dispatch schema is closed: `sessionSource ∈ {local, remote, all}`, `listScope ∈ {workspace, user, both}`. There is no third axis.
+3. **The backend *does* have the state, and KAS discards it.** Remote rows come from the portal service's `ListSpaces`. Its request carries a `status` query parameter and `SpaceSummary` carries a `status` field, whose enum is `SpaceStatus = {ACTIVE, INACTIVE}`. KAS calls `ListSpacesCommand({nextToken, maxResults})` — **no `status` filter** — and `spaceToSummary()` maps `spaceId`, `displayName`, `spaceType`, `createdAt`, `updatedAt`, `providerResources` and `sandboxStatus` while **dropping `status` entirely**.
+4. **That is also why every listed cloud session reads `idle`.** `_meta.kiro.status` is computed as `activeAwareStatus(id, summary.status) ?? "idle"`, and a remote summary never has a `status` — hence 58/58 `idle` in the fixture. The field is about the *agent*, not the space, and cannot be repurposed.
+
+**So the app cannot filter archived sessions today, and must not pretend to.** A `status` heuristic would be a guess, and hiding rows on a guess loses sessions.
+
+**What is missing, precisely.** One of:
+
+- KAS passes `_meta.kiro.listScope`-style intent through to `ListSpaces.status`, or accepts a new dispatch field, so the filter happens server-side; **or**
+- `spaceToSummary()` carries `space.status` into the summary and `buildSessionInfoRow()` projects it into `_meta.kiro`, so the client can filter. Either is a change in `kiro-cli`/KAS, not in this repo.
+
+**Unverified, and it matters:** that `SpaceStatus.INACTIVE` is what Kiro's web UI calls "archived". The names are suggestive and nothing was found that states the mapping. Confirming it needs an archived session observed in a `ListSpaces` response — which this investigation did not do, because the only route to one is a live authenticated call against the real account.
 
 ---
 
@@ -346,5 +447,7 @@ Regenerate with [`tools/acp-probe/`](../tools/acp-probe/).
 | **F-08** (sign-in) | Provider picker moves into the app. Bridge needs a pty driver. `logout` must be an explicit user action. |
 | **F-11** (repo picker) | Easier — a real catalog exists, with visibility and default branch. |
 | **New** | Per-turn credit display (`promptTurnSummaries`) is nearly free. `_kiro/userInput` needs UI. |
+| **F-25** items 2–3 (model) | Doable, but not through `session/set_model` — see [§4d](#4d-models-where-the-list-lives-and-how-the-model-is-actually-changed--verified-2026-09-03). The core API is `CloudSessionGateway.models` / `modelsFor(sessionId)` / `setModel(sessionId, modelId)`. A cloud session's model is genuinely unknown until the first `config_option_update`; render that state. |
+| **F-25** item 6 (archived) | **Blocked on the protocol**, not on us — [§4e](#4e-archived-sessions-are-not-exposed-over-acp--established-2026-09-03--no-code-written). The state exists in the backend and KAS drops it. Do not filter on a guess. |
 
 Nothing here refutes [ADR-001](adr/ADR-001-cloud-session-access.md)'s decision. The bridge topology holds, it is reachable entirely through documented CLI entry points, and the app can be built against it today.

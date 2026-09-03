@@ -6,6 +6,8 @@ import dev.kiro.core.model.ConfigOption
 import dev.kiro.core.model.ContextUsage
 import dev.kiro.core.model.ExecutionTarget
 import dev.kiro.core.model.InstanceStatus
+import dev.kiro.core.model.KiroModel
+import dev.kiro.core.model.ModelSelection
 import dev.kiro.core.model.PermissionOption
 import dev.kiro.core.model.PermissionRequest
 import dev.kiro.core.model.RepoCandidate
@@ -318,7 +320,7 @@ public object SessionUpdateParser {
 
             "config_option_update" -> SessionUpdate.ConfigOptionsChanged(
                 sessionId = sessionId,
-                options = parseConfigOptions(update),
+                options = ConfigOptionParser.parse(update),
             )
 
             "available_commands_update" -> SessionUpdate.AvailableCommandsChanged(
@@ -430,25 +432,6 @@ public object SessionUpdateParser {
         output = update.contentList(),
     )
 
-    private fun parseConfigOptions(update: JsonObject): List<ConfigOption> =
-        (update["configOptions"] as? JsonArray).orEmpty().mapNotNull { element ->
-            val obj = element as? JsonObject ?: return@mapNotNull null
-            ConfigOption(
-                id = obj.str("id") ?: return@mapNotNull null,
-                name = obj.str("name") ?: return@mapNotNull null,
-                category = obj.str("category"),
-                currentValue = obj.str("currentValue"),
-                options = (obj["options"] as? JsonArray).orEmpty().mapNotNull { choice ->
-                    val c = choice as? JsonObject ?: return@mapNotNull null
-                    ConfigOption.Choice(
-                        value = c.str("value") ?: return@mapNotNull null,
-                        name = c.str("name") ?: c.str("value").orEmpty(),
-                        description = c.str("description"),
-                    )
-                },
-            )
-        }
-
     internal fun parseOptions(array: JsonArray?): List<PermissionOption> =
         array.orEmpty().mapNotNull { element ->
             val obj = element as? JsonObject ?: return@mapNotNull null
@@ -460,9 +443,83 @@ public object SessionUpdateParser {
         }
 }
 
+/**
+ * Config options, wherever they turn up.
+ *
+ * They arrive from four places and the shape is identical in all four, so one
+ * parser serves them all: the `session/new` result, the `session/load` result,
+ * a `config_option_update` notification, and the `session/set_config_option`
+ * response (PROTOCOL-FINDINGS §4d).
+ *
+ * **A cloud session sends them only in the notification.** KAS's relayed
+ * `session/new` and `session/load` responses omit `modes` and `configOptions`
+ * outright — the sandbox owns the agent surface and pushes it over
+ * `config_option_update` once it is up. Parsing the result is still worth doing
+ * (a local session does carry them), but a caller must treat "nothing here" as
+ * the normal cloud case rather than a failure.
+ */
+public object ConfigOptionParser {
+
+    /**
+     * Reads a `configOptions` array off [container], which may be a `session/new`
+     * or `session/load` result, a `session/update` update object, or a
+     * `session/set_config_option` response. Anything else yields an empty list
+     * rather than throwing.
+     */
+    public fun parse(container: JsonElement?): List<ConfigOption> {
+        val root = container as? JsonObject ?: return emptyList()
+        return (root["configOptions"] as? JsonArray).orEmpty().mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            ConfigOption(
+                id = obj.str("id") ?: return@mapNotNull null,
+                name = obj.str("name") ?: return@mapNotNull null,
+                category = obj.str("category"),
+                currentValue = obj.str("currentValue"),
+                options = (obj["options"] as? JsonArray).orEmpty().mapNotNull { choice ->
+                    val c = choice as? JsonObject ?: return@mapNotNull null
+                    val kiro = c.obj("_meta")?.obj("kiro")
+                    ConfigOption.Choice(
+                        value = c.str("value") ?: return@mapNotNull null,
+                        name = c.str("name") ?: c.str("value").orEmpty(),
+                        description = c.str("description"),
+                        rateMultiplier = kiro?.num("rateMultiplier"),
+                        rateUnit = kiro?.str("rateUnit"),
+                    )
+                },
+            )
+        }
+    }
+}
+
 /** Modes offered by `session/new` and by the `mode` config option. */
 public fun ConfigOption.asAgentModes(): List<AgentMode> =
     options.map { AgentMode(it.value, it.name, it.description) }
+
+/** The models offered by the `model` config option. */
+public fun ConfigOption.asModels(): List<KiroModel> =
+    options.map { KiroModel(it.value, it.name, it.description, it.rateMultiplier, it.rateUnit) }
+
+/**
+ * Finds the `model` select in a config-option set and reads it as a selection.
+ *
+ * Matches on `id == "model"` first and falls back to `category == "model"`: KAS
+ * sets both, and matching either means a rename of one does not silently lose
+ * the picker. Returns [ModelSelection.Unknown] when there is no model option at
+ * all — which is the normal state of a cloud session that has not yet pushed
+ * one, not an error.
+ */
+public fun List<ConfigOption>.modelSelection(): ModelSelection {
+    val option = firstOrNull { it.id == ConfigOption.MODEL }
+        ?: firstOrNull { it.category == ConfigOption.MODEL }
+        ?: return ModelSelection.Unknown
+    return ModelSelection(available = option.asModels(), currentId = option.currentValue)
+}
+
+/** The `mode` select, read as modes. Empty when the agent offered none. */
+public fun List<ConfigOption>.agentModes(): List<AgentMode> =
+    (firstOrNull { it.id == ConfigOption.MODE } ?: firstOrNull { it.category == ConfigOption.MODE })
+        ?.asAgentModes()
+        .orEmpty()
 
 // ---------------------------------------------------------------------------
 // Server-initiated requests

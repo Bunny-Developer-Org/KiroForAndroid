@@ -3,6 +3,7 @@ package dev.kiro.core.session
 import dev.kiro.core.acp.AcpClient
 import dev.kiro.core.acp.AcpMethods
 import dev.kiro.core.acp.AcpRemoteException
+import dev.kiro.core.acp.ConfigOptionParser
 import dev.kiro.core.acp.ExtensionNamespace
 import dev.kiro.core.acp.InitializeResult
 import dev.kiro.core.acp.PermissionParser
@@ -13,10 +14,14 @@ import dev.kiro.core.acp.RpcRequest
 import dev.kiro.core.acp.SessionParser
 import dev.kiro.core.acp.SessionUpdate
 import dev.kiro.core.acp.SessionUpdateParser
+import dev.kiro.core.acp.modelSelection
+import dev.kiro.core.auth.PairedBridge
 import dev.kiro.core.model.CloudSession
+import dev.kiro.core.model.ConfigOption
 import dev.kiro.core.model.ExecutionTarget
 import dev.kiro.core.model.InstanceStatus
 import dev.kiro.core.model.ListScope
+import dev.kiro.core.model.ModelSelection
 import dev.kiro.core.model.PermissionRequest
 import dev.kiro.core.model.RepoCandidate
 import dev.kiro.core.model.SessionSource
@@ -34,6 +39,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
@@ -56,6 +62,17 @@ public class BridgeGateway(
     private val scope: CoroutineScope,
     private val logger: Logger = Logger.None,
     private val metrics: DriftMetrics = DriftMetrics.None,
+    /**
+     * How the bridge behind this gateway authenticates to Kiro, when the caller
+     * knows.
+     *
+     * Used for one thing: an unauthorised cloud call has two plausible causes —
+     * the account's plan, or the bridge's own credential — and the app has to name
+     * both unless it can rule one out. See [asDomainFailure]. Defaults to
+     * [PairedBridge.AuthMode.UNKNOWN] so nothing has to supply it; the message
+     * simply stays more cautious when it is not supplied.
+     */
+    private val bridgeAuthMode: PairedBridge.AuthMode = PairedBridge.AuthMode.UNKNOWN,
 ) : CloudSessionGateway {
 
     private val _connection = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
@@ -93,6 +110,11 @@ public class BridgeGateway(
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     override val rosterChanges: Flow<RosterChange> = _roster.asSharedFlow()
+
+    private val _models = MutableStateFlow(ModelState())
+    override val models: Flow<ModelState> = _models.asStateFlow()
+
+    override fun modelsFor(sessionId: String): ModelSelection = _models.value.forSession(sessionId)
 
     private var handshake: InitializeResult? = null
     private var namespace: ExtensionNamespace = ExtensionNamespace.Default
@@ -146,6 +168,15 @@ public class BridgeGateway(
                             // server request went to a connection we no longer hold.
                             if (update is SessionUpdate.PendingInteraction) {
                                 _permissions.emit(update.toPermissionRequest())
+                            }
+                            // The only channel a *cloud* session has for its model
+                            // list: the sandbox pushes config options here rather
+                            // than returning them from session/new or session/load
+                            // (PROTOCOL-FINDINGS §4d). Recorded before the update is
+                            // published so a collector that reacts to it already
+                            // sees the new selection.
+                            if (update is SessionUpdate.ConfigOptionsChanged) {
+                                recordModels(update.sessionId, update.options.modelSelection())
                             }
                             _updates.emit(update)
                         }
@@ -239,6 +270,10 @@ public class BridgeGateway(
             // meaningful path.
             put("cwd", PLACEHOLDER_CWD)
             put("mcpServers", buildJsonArray { })
+            // Kept because it has been sent since F-05 and the live server has
+            // never objected, but it is not what selects the mode: KAS reads
+            // `_meta.kiro.modeId` and nothing reads a top-level `agentMode`
+            // (PROTOCOL-FINDINGS §4d). The meta field below is the load-bearing one.
             request.modeId?.let { put("agentMode", it) }
             putKiroMeta {
                 // sessionSource and executionTarget are two spellings of one
@@ -247,6 +282,11 @@ public class BridgeGateway(
                     "executionTarget",
                     buildJsonObject { put("kind", ExecutionTarget.CLOUD_SANDBOX.wire) },
                 )
+                request.modeId?.let { put("modeId", it) }
+                // Accepted by the schema and honoured on the local path; the cloud
+                // create drops it (§4d), which is why applyRequestedModel below
+                // does the real work. Sent anyway so the local path is right too.
+                request.modelId?.let { put("modelId", it) }
                 if (request.repositories.isNotEmpty()) {
                     put(
                         "repositories",
@@ -261,11 +301,16 @@ public class BridgeGateway(
         val result = try {
             client.request(AcpMethods.SESSION_NEW, params, timeout = 3.minutes)
         } catch (e: AcpRemoteException) {
-            throw e.asDomainFailure()
+            throw e.asDomainFailure(bridgeAuthMode)
         }
 
         val sessionId = (result as? JsonObject)?.let { it.strOrNull("sessionId") }
             ?: throw CloudUnavailableException("session/new returned no sessionId")
+
+        // Present on a local session, absent on a cloud one. Recording it either
+        // way keeps the "we were told nothing" case explicit rather than implied.
+        recordModelsFromResult(sessionId, result)
+        request.modelId?.let { applyRequestedModel(sessionId, it) }
 
         return CloudSession(
             id = sessionId,
@@ -285,7 +330,7 @@ public class BridgeGateway(
     }
 
     override suspend fun loadSession(sessionId: String, source: SessionSource) {
-        client.request(
+        val result = client.request(
             AcpMethods.SESSION_LOAD,
             buildJsonObject {
                 put("sessionId", sessionId)
@@ -301,6 +346,9 @@ public class BridgeGateway(
             // before this resolves.
             timeout = 5.minutes,
         )
+        // A local session's load response carries configOptions; a cloud session's
+        // deliberately does not, and its models arrive later on the downlink.
+        recordModelsFromResult(sessionId, result)
     }
 
     override suspend fun prompt(sessionId: String, blocks: List<PromptBlock>): String? {
@@ -354,14 +402,80 @@ public class BridgeGateway(
         )
     }
 
+    /**
+     * Switches the session's model.
+     *
+     * Sent as `session/set_config_option`, not `session/set_model`. The latter is
+     * the ACP-standard spelling and the one this client used to name, but KAS does
+     * not implement the handler behind it and answers `-32601` — so the standard
+     * call is the *fallback* here, tried only if the agent turns out not to know
+     * the config-option verb either (PROTOCOL-FINDINGS §4d).
+     *
+     * The response carries the agent's authoritative config set, so the local
+     * snapshot is updated from what came back rather than from what was asked for
+     * — a rejected or coerced value must not be rendered as the current model.
+     */
     override suspend fun setModel(sessionId: String, modelId: String) {
-        client.request(
-            AcpMethods.SESSION_SET_MODEL,
-            buildJsonObject {
-                put("sessionId", sessionId)
-                put("modelId", modelId)
-            },
-        )
+        val result = try {
+            client.request(
+                AcpMethods.SESSION_SET_CONFIG_OPTION,
+                buildJsonObject {
+                    put("sessionId", sessionId)
+                    put("configId", ConfigOption.MODEL)
+                    put("value", modelId)
+                },
+            )
+        } catch (e: AcpRemoteException) {
+            if (e.error.code != RpcError.METHOD_NOT_FOUND) throw e
+            logger.warn("agent has no session/set_config_option; falling back to session/set_model")
+            client.request(
+                AcpMethods.SESSION_SET_MODEL,
+                buildJsonObject {
+                    put("sessionId", sessionId)
+                    put("modelId", modelId)
+                },
+            )
+        }
+        recordModelsFromResult(sessionId, result)
+    }
+
+    /**
+     * Records the model selection carried by a `session/new`, `session/load` or
+     * `session/set_config_option` result. A result with no `configOptions` — every
+     * cloud `session/new` and `session/load` — leaves the existing snapshot alone
+     * rather than overwriting a known selection with an empty one.
+     */
+    private fun recordModelsFromResult(sessionId: String, result: JsonElement?) {
+        val selection = ConfigOptionParser.parse(result).modelSelection()
+        if (selection.isKnown) recordModels(sessionId, selection)
+    }
+
+    private fun recordModels(sessionId: String, selection: ModelSelection) {
+        _models.value = _models.value.let { state ->
+            ModelState(
+                bySession = state.bySession + (sessionId to selection),
+                // Only ever replaced by a non-empty catalog: a session that reports
+                // a current model without a list must not blank out the list a
+                // create screen is relying on.
+                lastKnownCatalog = selection.available.ifEmpty { state.lastKnownCatalog },
+            )
+        }
+    }
+
+    /**
+     * Best-effort model switch on a freshly created session.
+     *
+     * Deliberately does not fail the create. The session exists at this point and
+     * throwing would strand it — a cloud session the user cannot see is worse than
+     * one running the default model, and the snapshot in [models] will keep saying
+     * what the agent actually reports rather than what was requested.
+     */
+    private suspend fun applyRequestedModel(sessionId: String, modelId: String) {
+        try {
+            setModel(sessionId, modelId)
+        } catch (e: Throwable) {
+            logger.warn("session $sessionId created but model $modelId was not applied: ${e.message}")
+        }
     }
 
     override suspend fun respondToPermission(
@@ -442,12 +556,8 @@ private const val PLACEHOLDER_CWD: String = "/"
  * established there is no capability or entitlement probe, so a failed create is
  * the only place these conditions become visible.
  */
-private fun AcpRemoteException.asDomainFailure(): Exception = when {
-    isAuthFailure -> NotEntitledException(
-        "This Kiro account cannot create cloud sessions. Cloud sessions need a Pro " +
-            "plan or higher, and Identity Center organisations also need an admin " +
-            "to enable the preview.",
-    )
+private fun AcpRemoteException.asDomainFailure(authMode: PairedBridge.AuthMode): Exception = when {
+    isAuthFailure -> NotEntitledException(unauthorizedMessage(authMode, requestId))
     error.message.contains("limit", ignoreCase = true) ||
         error.message.contains("concurrent", ignoreCase = true) ->
         SessionLimitReachedException(
@@ -455,6 +565,60 @@ private fun AcpRemoteException.asDomainFailure(): Exception = when {
                 "Finish or delete one before starting another.",
         )
     else -> this
+}
+
+/**
+ * What the app is allowed to say when Kiro's service answers `UnauthorizedException`.
+ *
+ * **This message used to assert "this Kiro account cannot create cloud sessions …
+ * needs a Pro plan or higher".** On 2026-09-03 that sentence was shown to the
+ * owner of a Kiro **Pro+** account and cost real debugging time: the bridge had
+ * been provisioned with a `KIRO_API_KEY`, and it was that identity the service
+ * refused — `session/list`, `_kiro/sourceProviders/list` and `session/new` alike,
+ * with `faultKind: serviceRejection`.
+ *
+ * The same day, a three-way ACP probe settled which limb it was
+ * (PROTOCOL-FINDINGS §4b, correction dated 2026-09-03): with no `KIRO_API_KEY`
+ * the identical probe listed 28 cloud sessions; with the existing key, and again
+ * with a freshly minted key from the *same* Pro+ account, `initialize` succeeded
+ * and `session/list` was rejected. `--auth-method cli` was passed in all three —
+ * the environment variable was the only variable. So under `API_KEY` the auth
+ * mode is named first, because on this account it is the observed cause twice
+ * over; the plan stays in the sentence as the secondary possibility rather than
+ * the headline, because it is exactly the claim that misled.
+ *
+ * The boundary the copy respects: both keys came from one account's console, so
+ * nothing here licenses "API keys never reach cloud sessions" as a universal
+ * statement — only that this is the first thing to check.
+ */
+private fun unauthorizedMessage(authMode: PairedBridge.AuthMode, requestId: String?): String {
+    val cause = when (authMode) {
+        PairedBridge.AuthMode.API_KEY ->
+            "This bridge authenticates with a host API key rather than as you, and that is the " +
+                "likeliest cause: on a Kiro Pro+ account, two separate API keys were both refused " +
+                "for cloud sessions while an interactive `kiro-cli login` on the same account " +
+                "worked seconds later. Re-run the bridge without KIRO_API_KEY, signed in with " +
+                "`kiro-cli login`. If it still fails, the remaining possibility is entitlement — " +
+                "cloud sessions need a Pro plan or higher, and Identity Center organisations also " +
+                "need an admin to enable the preview."
+
+        PairedBridge.AuthMode.CLI_LOGIN ->
+            "This bridge is signed in as you rather than running under a host API key, so the " +
+                "credential is the one you signed in with. The remaining explanation is entitlement: " +
+                "cloud sessions need a Pro plan or higher, and Identity Center organisations also " +
+                "need an admin to enable the preview."
+
+        PairedBridge.AuthMode.UNKNOWN ->
+            "Check how the bridge authenticates first. A bridge running under a KIRO_API_KEY has " +
+                "been observed being refused for cloud sessions on a Pro+ account, with two " +
+                "different keys, where an interactive `kiro-cli login` on that same account worked. " +
+                "If the bridge is already signed in as you, the remaining explanation is " +
+                "entitlement: cloud sessions need a Pro plan or higher, and Identity Center " +
+                "organisations also need an admin to enable the preview."
+    }
+    val trace = requestId?.let { " Kiro's request id for this failure is $it." }.orEmpty()
+    return "Kiro's service refused this request as unauthorized, so no cloud session was created. " +
+        cause + trace
 }
 
 private fun JsonObject.strOrNull(key: String): String? =
