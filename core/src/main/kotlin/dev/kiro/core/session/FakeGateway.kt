@@ -4,7 +4,9 @@ import dev.kiro.core.acp.SessionUpdate
 import dev.kiro.core.model.CloudSession
 import dev.kiro.core.model.ExecutionTarget
 import dev.kiro.core.model.InstanceStatus
+import dev.kiro.core.model.KiroModel
 import dev.kiro.core.model.ListScope
+import dev.kiro.core.model.ModelSelection
 import dev.kiro.core.model.PermissionOption
 import dev.kiro.core.model.PermissionRequest
 import dev.kiro.core.model.RepoCandidate
@@ -62,6 +64,28 @@ public class FakeGateway(
     private val _roster = MutableSharedFlow<RosterChange>(extraBufferCapacity = 8)
     override val rosterChanges: Flow<RosterChange> = _roster.asSharedFlow()
 
+    private val _models = MutableStateFlow(
+        ModelState(
+            bySession = defaultSessions.associate { it.id to ModelSelection(CATALOG, "auto") },
+            lastKnownCatalog = CATALOG,
+        ),
+    )
+    override val models: Flow<ModelState> = _models.asStateFlow()
+
+    override fun modelsFor(sessionId: String): ModelSelection = _models.value.forSession(sessionId)
+
+    /**
+     * Drops a session back to "we have not been told", which is what a real cloud
+     * session looks like between `session/load` returning and the sandbox pushing
+     * its first `config_option_update`. Previews of the not-known-yet state need a
+     * way to reach it.
+     */
+    public fun simulateUnknownModels(sessionId: String) {
+        _models.value = _models.value.let { state ->
+            state.copy(bySession = state.bySession - sessionId)
+        }
+    }
+
     /** Flip to exercise the degradation contract without unplugging anything. */
     public fun simulateUnreachable(lastSeenMillis: Long?, workstationOnly: Boolean = true) {
         _connection.value = ConnectionState.Unreachable(lastSeenMillis, workstationOnly)
@@ -94,6 +118,7 @@ public class FakeGateway(
             cwd = "",
         )
         sessions.add(0, created)
+        recordModels(created.id, ModelSelection(CATALOG, request.modelId ?: "auto"))
         _roster.emit(RosterChange(listOf(created), emptyList()))
         return created
     }
@@ -159,7 +184,18 @@ public class FakeGateway(
 
     override suspend fun setMode(sessionId: String, modeId: String): Unit = Unit
 
-    override suspend fun setModel(sessionId: String, modelId: String): Unit = Unit
+    override suspend fun setModel(sessionId: String, modelId: String) {
+        recordModels(sessionId, ModelSelection(CATALOG, modelId))
+    }
+
+    private fun recordModels(sessionId: String, selection: ModelSelection) {
+        _models.value = _models.value.let { state ->
+            ModelState(
+                bySession = state.bySession + (sessionId to selection),
+                lastKnownCatalog = selection.available.ifEmpty { state.lastKnownCatalog },
+            )
+        }
+    }
 
     override suspend fun respondToPermission(
         sessionId: String,
@@ -219,6 +255,22 @@ public class FakeGateway(
 
     private companion object {
         const val CHUNK_INTERVAL_MILLIS = 40L
+
+        /**
+         * A trimmed slice of the real catalog, copied verbatim from the `model`
+         * config option in `prompt-turn-with-permission.jsonl` (ids and rate
+         * multipliers cross-checked against `kiro-cli chat --list-models` on
+         * 2026-09-03). Real ids matter here: a preview built against invented ones
+         * hides how long the names are and how wide the credit column has to be.
+         */
+        val CATALOG = listOf(
+            KiroModel("auto", "Auto", "Models chosen by task", 1.0, "Credit"),
+            KiroModel("claude-opus-5", "Claude Opus 5", "1M context window", 2.2, "Credit"),
+            KiroModel("claude-sonnet-5", "Claude Sonnet 5", "1M context window", 1.3, "Credit"),
+            KiroModel("claude-haiku-4.5", "Claude Haiku 4.5", "The latest Claude Haiku", 0.4, "Credit"),
+            KiroModel("gpt-5.6-luna", "GPT 5.6 Luna", "Experimental preview", 0.1, "Credit"),
+            KiroModel("qwen3-coder-next", "Qwen3 Coder Next", "Experimental preview", 0.05, "Credit"),
+        )
 
         val SCRIPTED_REPLY = listOf(
             "I looked at ", "the repository ", "and the build ", "is green. ",

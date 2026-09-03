@@ -2,13 +2,16 @@ package dev.kiro.core.session
 
 import dev.kiro.core.acp.SessionUpdate
 import dev.kiro.core.model.CloudSession
+import dev.kiro.core.model.KiroModel
 import dev.kiro.core.model.ListScope
+import dev.kiro.core.model.ModelSelection
 import dev.kiro.core.model.PermissionRequest
 import dev.kiro.core.model.RepoCandidate
 import dev.kiro.core.model.SessionSource
 import dev.kiro.core.model.SourceProvider
 import dev.kiro.core.model.UserInputRequest
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 /**
  * The seam every feature codes against.
@@ -40,6 +43,27 @@ public interface CloudSessionGateway {
     /** Roster changes pushed by the agent, so the session list need not poll. */
     public val rosterChanges: Flow<RosterChange>
 
+    /**
+     * Which model each session is using, and what it could use instead.
+     *
+     * A `StateFlow`, unlike the event streams above, because this is *state*: a
+     * screen that opens mid-session must be able to read the current value rather
+     * than wait for the next push. It updates from every source the agent offers
+     * — the `session/new` and `session/load` results, every `config_option_update`
+     * notification, and the `session/set_config_option` response.
+     *
+     * For a cloud session it starts at [ModelSelection.Unknown] and stays there
+     * until the sandbox pushes its first `config_option_update`; that gap is real
+     * and the UI must render it as "not known yet" (PROTOCOL-FINDINGS §4d).
+     *
+     * Defaulted to "nothing known" so a stub gateway — a test double, a screen's
+     * fake — is not forced to have an opinion about models it never sees.
+     */
+    public val models: Flow<ModelState> get() = flowOf(ModelState())
+
+    /** The last known selection for one session, or [ModelSelection.Unknown]. */
+    public fun modelsFor(sessionId: String): ModelSelection = ModelSelection.Unknown
+
     public suspend fun listSessions(
         source: SessionSource = SessionSource.REMOTE,
         scope: ListScope = ListScope.USER,
@@ -67,6 +91,18 @@ public interface CloudSessionGateway {
 
     public suspend fun setMode(sessionId: String, modeId: String)
 
+    /**
+     * Switches the model a session uses from the next message onwards.
+     *
+     * [modelId] is a wire id from [ModelSelection.available] — `auto`,
+     * `claude-opus-5`, `gpt-5.6-luna` and so on. Sent as
+     * `session/set_config_option` rather than `session/set_model`: the latter is
+     * ACP-standard but unimplemented by KAS, which answers method-not-found
+     * (PROTOCOL-FINDINGS §4d).
+     *
+     * Throws whatever the agent returned if the switch was refused — a caller
+     * that swallows this will show a model the session is not using.
+     */
     public suspend fun setModel(sessionId: String, modelId: String)
 
     /**
@@ -131,9 +167,41 @@ public sealed interface ConnectionState {
 public data class CreateSessionRequest(
     val repositories: List<String>,
     val firstPrompt: String,
+    /** Sent as `_meta.kiro.modeId`; the agent defaults to `vibe` when null. */
     val modeId: String? = null,
+    /**
+     * Applied *after* the session exists, with [CloudSessionGateway.setModel].
+     *
+     * `session/new` does accept a `_meta.kiro.modelId`, but only on the local
+     * path — KAS's cloud create passes the backend `agentMode`, execution target
+     * and repositories and drops the model outright (PROTOCOL-FINDINGS §4d). So a
+     * requested model has to be a second call, and it is best-effort: a session
+     * that was created but could not be switched is still a session, and the
+     * gateway reports the model the agent actually confirms rather than the one
+     * that was asked for.
+     */
     val modelId: String? = null,
 )
+
+/**
+ * Model state across every session this gateway is watching.
+ *
+ * [lastKnownCatalog] exists because of a gap in the protocol: **there is no way
+ * to list models without a session.** The `initialize` handshake enumerates 24
+ * extension methods and none of them is a model catalog, and the list only ever
+ * arrives attached to a session's config options (PROTOCOL-FINDINGS §4d). So a
+ * create screen that wants to offer a model picker before the session exists can
+ * only reuse a catalog seen earlier in this connection — and must cope with it
+ * being empty on a cold start, when the only honest option is to create the
+ * session first and switch afterwards.
+ */
+public data class ModelState(
+    val bySession: Map<String, ModelSelection> = emptyMap(),
+    val lastKnownCatalog: List<KiroModel> = emptyList(),
+) {
+    public fun forSession(sessionId: String): ModelSelection =
+        bySession[sessionId] ?: ModelSelection.Unknown
+}
 
 public sealed interface PromptBlock {
     public data class Text(val text: String) : PromptBlock
@@ -151,12 +219,19 @@ public data class RosterChange(
 public class CloudUnavailableException(message: String) : Exception(message)
 
 /**
- * The account is signed in but not entitled to cloud sessions.
+ * Kiro's service refused the request as unauthorized.
  *
- * This has to be derived from a failed create rather than probed in advance:
- * F-01 established `whoami --format json` returns identity only, with no plan or
- * entitlement field. Without this distinction an unentitled user gets an opaque
- * failure and no idea that the answer is "upgrade to Pro".
+ * **The name overstates what is known and is kept only because the app already
+ * catches it.** Entitlement is one cause; the credential the *bridge* itself
+ * authenticates with is another, and on 2026-09-03 it was the second one — a
+ * `KIRO_API_KEY`-provisioned bridge on a Pro+ account, refused for every cloud
+ * call, where an interactive login on the same account worked (PROTOCOL-FINDINGS
+ * §4b, correction dated 2026-09-03). Read [Throwable.message], which names both;
+ * do not add copy of your own that asserts the plan is at fault.
+ *
+ * It has to be derived from a failed call rather than probed in advance: F-01
+ * established `whoami --format json` returns identity only, with no plan or
+ * entitlement field.
  */
 public class NotEntitledException(message: String) : Exception(message)
 

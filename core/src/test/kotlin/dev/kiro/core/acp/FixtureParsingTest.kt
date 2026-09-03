@@ -107,6 +107,54 @@ class FixtureParsingTest {
         assertTrue(repos.map { it.defaultBranch }.toSet().size > 1)
     }
 
+    /**
+     * The model list exists, and this is where it lives.
+     *
+     * Nothing in the protocol lists models on their own — the handshake's 24
+     * extension methods contain no catalog — so the only source is a session's
+     * `configOptions`, which this `session/new` result carries (PROTOCOL-FINDINGS
+     * §4d). The ids are asserted verbatim because they are also what
+     * `session/set_config_option` has to be given back.
+     */
+    @Test
+    fun `session new carries the model catalog and the current model`() {
+        val result = firstAgentResult("prompt-turn-with-permission.jsonl", skip = 1)
+        val selection = ConfigOptionParser.parse(result).modelSelection()
+
+        assertTrue(selection.isKnown)
+        assertTrue(selection.hasCatalog)
+        assertEquals("auto", selection.currentId)
+        assertEquals("Auto", assertNotNull(selection.current).name)
+
+        val ids = selection.available.map { it.id }
+        assertTrue(ids.contains("claude-opus-5"), "expected the real ids, got $ids")
+        assertTrue(ids.contains("gpt-5.6-luna"))
+
+        // The credit multiplier is the only pricing signal the protocol gives, and
+        // it lives in the choice's _meta.kiro rather than alongside name.
+        val opus = selection.available.first { it.id == "claude-opus-5" }
+        assertEquals(2.2, opus.rateMultiplier)
+        assertEquals("Credit", opus.rateUnit)
+    }
+
+    /** The same set arrives live, which is a cloud session's *only* route to it. */
+    @Test
+    fun `a config option update carries the same model set as session new`() {
+        val update = Fixtures.load("prompt-turn-with-permission.jsonl")
+            .filter { it.isFromAgent }
+            .mapNotNull { it.decoded as? RpcNotification }
+            .mapNotNull { SessionUpdateParser.parse(it.params) }
+            .filterIsInstance<SessionUpdate.ConfigOptionsChanged>()
+            .first()
+
+        val selection = update.options.modelSelection()
+        assertEquals("auto", selection.currentId)
+        assertTrue(selection.available.size > 10)
+
+        // Modes ride the same notification and must not be confused with models.
+        assertTrue(update.options.agentModes().map { it.id }.contains("vibe"))
+    }
+
     @Test
     fun `every frame in every fixture decodes without a malformed result`() {
         val fixtures = listOf(
