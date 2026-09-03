@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiro Mark — icon &amp; splash preview</title>
+<style>
+  :root { color-scheme: light dark; }
+  :root{
+    --page-bg:#fafafa;
+    --page-bg-elevated:#ffffff;
+    --page-border:#e4e4e7;
+    --page-text:#3f3f46;
+    --page-text-strong:#18181b;
+    --page-muted:#71717a;
+    --icon-bg:#12141a;
+    --icon-mint:#00d492;
+    --icon-mint-light:#047558;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --page-bg:#0e0f13;
+      --page-bg-elevated:#15171e;
+      --page-border:#262a35;
+      --page-text:#c9c9cf;
+      --page-text-strong:#f4f4f5;
+      --page-muted:#8a8a92;
+    }
+  }
+  :root[data-theme="dark"]{
+    --page-bg:#0e0f13;
+    --page-bg-elevated:#15171e;
+    --page-border:#262a35;
+    --page-text:#c9c9cf;
+    --page-text-strong:#f4f4f5;
+    --page-muted:#8a8a92;
+  }
+
+  * { box-sizing: border-box; }
+  body{
+    margin:0;
+    background:var(--page-bg);
+    color:var(--page-text);
+    font-family:"Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+    padding:48px 24px 80px;
+  }
+  .wrap{ max-width:920px; margin:0 auto; }
+
+  .eyebrow{
+    font-family:"JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+    font-size:12px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:var(--icon-mint-light);
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin-bottom:10px;
+  }
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .eyebrow{ color:var(--icon-mint); } }
+  :root[data-theme="dark"] .eyebrow{ color:var(--icon-mint); }
+
+  h1{
+    font-size:28px;
+    font-weight:600;
+    letter-spacing:-0.01em;
+    color:var(--page-text-strong);
+    margin:0 0 6px;
+    text-wrap:balance;
+  }
+  .sub{
+    font-size:14px;
+    color:var(--page-muted);
+    max-width:60ch;
+    line-height:1.55;
+    margin:0 0 40px;
+  }
+
+  section{ margin-bottom:44px; }
+  .section-label{
+    font-family:"JetBrains Mono", ui-monospace, monospace;
+    font-size:11px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:var(--page-muted);
+    margin:0 0 16px;
+    padding-bottom:10px;
+    border-bottom:1px solid var(--page-border);
+  }
+
+  /* ---- mask preview row ---- */
+  .masks{
+    display:grid;
+    grid-template-columns:repeat(3, 1fr);
+    gap:20px;
+  }
+  .mask-card{
+    background:var(--page-bg-elevated);
+    border:1px solid var(--page-border);
+    border-radius:12px;
+    padding:24px 16px 16px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:14px;
+  }
+  .mask-shape{
+    width:104px; height:104px;
+    background:var(--icon-bg);
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden;
+  }
+  .mask-shape.circle{ border-radius:50%; }
+  .mask-shape.squircle{ border-radius:38% / 38%; clip-path: path("M52,0 C93,0 104,11 104,52 C104,93 93,104 52,104 C11,104 0,93 0,52 C0,11 11,0 52,0 Z"); border-radius:0; }
+  .mask-shape.rounded{ border-radius:22px; }
+  .mask-shape svg{ width:76%; height:76%; }
+  .mask-caption{
+    font-family:"JetBrains Mono", ui-monospace, monospace;
+    font-size:11px;
+    color:var(--page-muted);
+  }
+
+  /* ---- safe zone diagram ---- */
+  .safezone-row{
+    display:flex;
+    gap:32px;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+  .safezone-diagram{ width:220px; height:220px; flex:none; }
+  .safezone-notes{
+    flex:1;
+    min-width:240px;
+    font-size:13px;
+    line-height:1.7;
+    color:var(--page-text);
+  }
+  .safezone-notes b{ color:var(--page-text-strong); }
+  .safezone-notes code{
+    font-family:"JetBrains Mono", ui-monospace, monospace;
+    font-size:12px;
+    background:var(--page-bg);
+    border:1px solid var(--page-border);
+    padding:1px 5px;
+    border-radius:4px;
+  }
+
+  /* ---- splash mockup ---- */
+  .splash-row{ display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start; }
+  .phone{
+    width:220px;
+    height:462px;
+    background:var(--icon-bg);
+    border-radius:34px;
+    border:6px solid #06070a;
+    position:relative;
+    flex:none;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    box-shadow: 0 1px 0 rgba(255,255,255,.04) inset;
+  }
+  .phone::before{
+    content:"";
+    position:absolute;
+    top:14px; left:50%; transform:translateX(-50%);
+    width:52px; height:5px; border-radius:3px;
+    background:rgba(255,255,255,.14);
+  }
+  .phone svg{ width:34%; }
+  .splash-notes{ flex:1; min-width:260px; font-size:13px; line-height:1.7; color:var(--page-text); }
+  .splash-notes b{ color:var(--page-text-strong); }
+
+  /* ---- spec table ---- */
+  .spec-table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:13px;
+  }
+  .spec-table th, .spec-table td{
+    text-align:left;
+    padding:9px 12px;
+    border-bottom:1px solid var(--page-border);
+  }
+  .spec-table th{
+    font-family:"JetBrains Mono", ui-monospace, monospace;
+    font-size:11px;
+    letter-spacing:.05em;
+    text-transform:uppercase;
+    color:var(--page-muted);
+    font-weight:500;
+  }
+  .swatch{
+    display:inline-block;
+    width:12px; height:12px;
+    border-radius:3px;
+    margin-right:8px;
+    vertical-align:-1px;
+    border:1px solid rgba(127,127,136,.35);
+  }
+  .mono{ font-family:"JetBrains Mono", ui-monospace, monospace; font-size:12px; color:var(--page-text); }
+  .file-list{ font-size:13px; line-height:1.9; }
+  .file-list code{
+    font-family:"JetBrains Mono", ui-monospace, monospace;
+    font-size:12px;
+    background:var(--page-bg);
+    border:1px solid var(--page-border);
+    padding:1px 6px;
+    border-radius:4px;
+  }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">
+    <svg width="14" height="14" viewBox="0 0 108 108"><rect width="108" height="108" rx="20" fill="none"/><g stroke="currentColor" stroke-width="12" stroke-linecap="square" fill="none"><path d="M42,30 L42,78"/><path d="M48,54 L72,35"/><path d="M48,54 L72,73"/></g></svg>
+    icon &amp; splash
+  </div>
+  <h1>One mark, three surfaces</h1>
+  <p class="sub">
+    A monospace-drawn <b style="color:var(--page-text-strong)">K</b> — three strokes, one weight, square terminals —
+    built to sit on the app's existing dark-bg / single-mint-accent language rather than invent a new one.
+    It composites straight from three line segments, so it is one adaptive-icon foreground and one splash icon,
+    not a set of exported pngs.
+  </p>
+
+  <section>
+    <p class="section-label">Launcher — mask shapes</p>
+    <div class="masks">
+      <div class="mask-card">
+        <div class="mask-shape circle">
+          <svg viewBox="0 0 108 108"><g stroke="#00D492" stroke-width="12" stroke-linecap="square" fill="none"><path d="M42,30 L42,78"/><path d="M48,54 L72,35"/><path d="M48,54 L72,73"/></g></svg>
+        </div>
+        <span class="mask-caption">circle (Pixel)</span>
+      </div>
+      <div class="mask-card">
+        <div class="mask-shape squircle">
+          <svg viewBox="0 0 108 108"><g stroke="#00D492" stroke-width="12" stroke-linecap="square" fill="none"><path d="M42,30 L42,78"/><path d="M48,54 L72,35"/><path d="M48,54 L72,73"/></g></svg>
+        </div>
+        <span class="mask-caption">squircle (Samsung)</span>
+      </div>
+      <div class="mask-card">
+        <div class="mask-shape rounded">
+          <svg viewBox="0 0 108 108"><g stroke="#00D492" stroke-width="12" stroke-linecap="square" fill="none"><path d="M42,30 L42,78"/><path d="M48,54 L72,35"/><path d="M48,54 L72,73"/></g></svg>
+        </div>
+        <span class="mask-caption">rounded square</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="section-label">Safe zone</p>
+    <div class="safezone-row">
+      <svg class="safezone-diagram" viewBox="0 0 108 108">
+        <rect width="108" height="108" fill="var(--icon-bg)"/>
+        <circle cx="54" cy="54" r="33" fill="none" stroke="rgba(0,212,146,.35)" stroke-width="1" stroke-dasharray="3 3"/>
+        <g stroke="#00D492" stroke-width="12" stroke-linecap="square" fill="none">
+          <path d="M42,30 L42,78"/>
+          <path d="M48,54 L72,35"/>
+          <path d="M48,54 L72,73"/>
+        </g>
+      </svg>
+      <div class="safezone-notes">
+        Every stroke terminal sits at radius <b>≈32.1dp</b> from centre — just inside the <b>33dp safe-zone circle</b>
+        adaptive icons guarantee across every launcher mask, so the mark holds its proportions whether the shape
+        is a circle, a squircle, or a rounded square. Nothing depends on corner bleed.
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="section-label">Splash</p>
+    <div class="splash-row">
+      <div class="phone">
+        <svg viewBox="0 0 108 108"><g stroke="#00D492" stroke-width="12" stroke-linecap="square" fill="none"><path d="M42,30 L42,78"/><path d="M48,54 L72,35"/><path d="M48,54 L72,73"/></g></svg>
+      </div>
+      <div class="splash-notes">
+        Same drawable, same background colour, drawn full-bleed with <code style="font-family:'JetBrains Mono',monospace;background:var(--page-bg);border:1px solid var(--page-border);padding:1px 6px;border-radius:4px;">androidx.core.splashscreen</code>
+        so API&nbsp;26+ gets the same reveal API&nbsp;31 draws natively. It hands off to
+        <b>Theme.KiroForAndroid</b> the moment Compose's first frame is up — no separate splash artwork to keep in sync,
+        no second place the mark can drift out of date.
+      </div>
+    </div>
+  </section>
+
+  <section style="margin-bottom:8px;">
+    <p class="section-label">Spec</p>
+    <table class="spec-table">
+      <tr><th>Role</th><th>Value</th><th>Source</th></tr>
+      <tr><td>Stroke</td><td><span class="swatch" style="background:#00D492"></span><span class="mono">#00D492</span></td><td class="mono">Palette.DarkAccent</td></tr>
+      <tr><td>Field</td><td><span class="swatch" style="background:#12141A"></span><span class="mono">#12141A</span></td><td class="mono">Palette.DarkBg</td></tr>
+      <tr><td>Stroke width</td><td class="mono">12 / 108 viewport</td><td class="mono">—</td></tr>
+      <tr><td>Cap / join</td><td class="mono">square, no round or bevel</td><td class="mono">VISUAL-LANGUAGE §4 — no pill shapes</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <p class="section-label">Files touched</p>
+    <div class="file-list">
+      <div><code>app/src/main/res/drawable/ic_launcher_foreground.xml</code> — mark redrawn as three stroked paths</div>
+      <div><code>app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml</code> — monochrome (Android 13+ themed icon) layer added</div>
+      <div><code>app/src/main/res/values/themes.xml</code> — new <span class="mono">Theme.KiroForAndroid.Splash</span>, reusing the same drawable + colour</div>
+      <div><code>app/src/main/kotlin/dev/kiro/android/MainActivity.kt</code> — <span class="mono">installSplashScreen()</span></div>
+      <div><code>app/src/main/AndroidManifest.xml</code>, <code>gradle/libs.versions.toml</code>, <code>app/build.gradle.kts</code></div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

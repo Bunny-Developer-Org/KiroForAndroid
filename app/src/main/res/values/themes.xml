@@ -1,4 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.KiroForAndroid" parent="android:Theme.Material.NoActionBar" />
+
+    <!-- androidx.core.splashscreen backports Android 12's SplashScreen API to
+         minSdk 26, so it, not the platform default, is what every user sees.
+         Same field colour and mark as the launcher icon: the reveal is meant
+         to read as one continuous surface, not two pieces of art that happen
+         to share a palette. -->
+    <style name="Theme.KiroForAndroid.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/ic_launcher_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.KiroForAndroid</item>
+    </style>
 </resources>

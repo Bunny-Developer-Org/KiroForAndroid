@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import dev.kiro.android.platform.PairingClient
 import dev.kiro.android.service.Backoff
 import dev.kiro.android.ui.AppNavigation
@@ -37,6 +38,9 @@ import kotlinx.coroutines.selects.select
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Must run before super.onCreate() -- it is what applies
+        // Theme.KiroForAndroid.Splash's postSplashScreenTheme swap.
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         // Edge to edge, then let each surface own its insets. Safe area is padding,
         // not size -- that is what keeps the composer's send button above the
