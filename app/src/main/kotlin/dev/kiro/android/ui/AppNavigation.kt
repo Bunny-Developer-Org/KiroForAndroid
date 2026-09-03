@@ -24,6 +24,7 @@ import dev.kiro.android.ui.sessions.SessionListViewModel
 import dev.kiro.android.ui.theme.KiroLayout
 import dev.kiro.android.ui.transcript.ApprovalCard
 import dev.kiro.android.ui.transcript.Composer
+import dev.kiro.android.ui.transcript.SessionModelBar
 import dev.kiro.android.ui.transcript.TranscriptHeader
 import dev.kiro.android.ui.transcript.TranscriptScreen
 import dev.kiro.android.ui.transcript.TranscriptViewModel
@@ -104,6 +105,10 @@ private fun TranscriptHost(
 
     Column(Modifier.fillMaxSize()) {
         TranscriptHeader(session = session, onBack = onBack, onNewSessionInRepo = onNewSessionInRepo)
+
+        // Above the transcript, not behind a menu: "which model is this session
+        // running, and what does it cost" was unanswerable from this screen.
+        SessionModelBar(viewModel)
 
         Box(Modifier.weight(1f)) {
             TranscriptScreen(state, Modifier.fillMaxSize())
