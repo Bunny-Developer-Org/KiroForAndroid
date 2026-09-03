@@ -13,11 +13,11 @@
 # your laptop next to a local bridge is the mixed shape C instead: same
 # commands, $0/month, but reachable only while that laptop is awake.
 #
-# NOT RUN AGAINST A REAL ACCOUNT while writing this: `cloudflared` happens to
-# be installed on the machine that authored this script, which made it
-# possible to check every flag below against real `--help` output, but
-# `tunnel login`/`create`/`route dns` were never actually invoked. Read it
-# before trusting it with a real domain.
+# Run against a real account and a real zone on 2026-09-03. One bug surfaced
+# immediately and is fixed below: the tunnel-ID lookup assumed compact JSON,
+# and the failing grep took the whole script down under `set -euo pipefail`
+# one line after a tunnel had actually been created. The rest of the path -
+# login, create, route dns, config, systemd unit - is now verified end to end.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
