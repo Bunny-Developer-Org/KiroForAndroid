@@ -64,6 +64,52 @@ Timeboxed, non-blocking, high upside. [ADR-005 §4 Option E](adr/ADR-005-bridge-
 - **Scope out:** productising it. Even a success changes an ADR before it changes any code — Doze, battery, and holding a signed-in Kiro account on a phone are separate questions.
 - **Depends on:** nothing.
 
+### F-25 · Transcript and picker defects found on-device (2026-09-03) · `M` · 🟡 **5 of 6 DONE 2026-09-03**
+Six defects observed in a live run on an emulator against a real cloud session
+(`Bunny-Developer-Org/KiroForAndroid`, prompt answered end to end). Grouped as
+one item because they are all in the create-session and transcript screens.
+
+- **Do:**
+  1. **Repo picker is a flat always-open list.** It should collapse: picking a
+     repo closes the list and shows the selection; a `+` control adds another.
+     Today [`CreateSessionScreen`](../app/src/main/kotlin/dev/kiro/android/ui/create/CreateSessionScreen.kt)
+     renders every repository inline, so the whole form is buried under it.
+  2. **The transcript never shows which model is in use.** Nothing on screen
+     names it, so the operator cannot tell what a turn cost or what answered.
+  3. **The model cannot be changed.** The plumbing exists —
+     [`BridgeGateway.setModel`](../core/src/main/kotlin/dev/kiro/core/session/BridgeGateway.kt)
+     and `AcpMethods.SESSION_SET_MODEL` — but **no UI calls it**: `grep -rn
+     setModel app/src/main/kotlin` returns nothing. A picker should set the
+     model for the operator's next message.
+  4. **Too much dead space under the composer** at the bottom of the
+     transcript.
+  5. **Agent responses are rendered as raw text, not Markdown.** `##`, `**`
+     and backticks appear literally on screen — confirmed in the live run, and
+     `grep -rni markdown app/src/main core/src/main` finds no handling at all.
+     Needs a renderer that is safe on partial input, because text arrives in
+     chunks (see F-08's streaming contract) and must not flicker mid-token.
+  6. **The session list shows archived sessions.** `grep -rni archiv` over
+     `core/src/main` and `app/src/main` finds nothing, so nothing is filtered
+     and no archive state is modelled anywhere yet.
+- **Status:** 1–5 fixed and verified on an emulator against a live session.
+  6 is **blocked upstream** and cannot be fixed here: the backend has the state
+  (`SpaceSummary.status`, enum `ACTIVE`/`INACTIVE`) but KAS calls `ListSpaces`
+  with no filter and `spaceToSummary()` drops the field, so it never reaches any
+  client. Either KAS forwards a filter or it carries `space.status` into
+  `_meta.kiro`; both are changes in `kiro-cli`/KAS. See PROTOCOL-FINDINGS §4e.
+  *Unverified:* that `INACTIVE` is what the web UI calls "archived".
+- **Found while fixing this, not in the original list:** the create screen's
+  mode chips never took effect. Nothing was selected by default, and a selected
+  mode was sent as a top-level `agentMode` while KAS reads `_meta.kiro.modeId` —
+  so every cloud session this app has ever created ran the server's default.
+  Fixed with the rest.
+- **Done when:** each of the six is either fixed or, where it needs a protocol
+  affordance we do not have, written up with the specific missing piece named.
+- **Scope out:** a full Markdown feature set. Headings, bold, inline code,
+  lists and fenced blocks cover what the agent actually emits; tables and HTML
+  can wait.
+- **Depends on:** nothing. All six are app-layer.
+
 ---
 
 ## Phase 1 — Foundation
