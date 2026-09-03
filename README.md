@@ -28,6 +28,75 @@ What the bridge host actually needs turns out to be much less than it sounds:
 
 That last row is the honest catch: **a sleeping bridge is a silent app.** Notifications are sent by the bridge, so if it lives on a laptop that closes at night, approval prompts do not reach you until it wakes. [ADR-005](docs/adr/ADR-005-bridge-hosting-and-availability.md) treats that as a documented limitation with a designed degradation path, not a bug to chase.
 
+## How the pieces fit
+
+Four processes, two separate authentications, and one seam the whole app is written against.
+
+```
+  YOUR PHONE                                              app/ · core/
+┌──────────────────────────────────────────────────────────────────────┐
+│  Compose UI  ──►  ViewModels  ──►  CloudSessionGateway (core/)       │
+│  onboarding · sessions             the one seam every feature codes  │
+│  create · transcript               against                           │
+│                                            │                         │
+│                        ┌───────────────────┴───────────────┐         │
+│                  BridgeGateway (core/)                FakeGateway    │
+│                        │  live, over ACP               offline; every│
+│                        ▼                               screen still  │
+│                  AcpClient (core/)                     renders       │
+│                        │  request/response correlation,              │
+│                        ▼  and agent→client requests                  │
+│                  WebSocketAcpTransport (app/)                        │
+│                                                                      │
+│  SessionConnectionService (foreground, dataSync) holds the socket;   │
+│  Backoff + ConnectivityObserver reconnect.  KeystoreTokenStore keeps │
+│  the pairing token — nothing belonging to Kiro is ever on the phone. │
+└──────────────────────────────────────────────────────────────────────┘
+        │  ▲                                                      ▲
+        │  │  POST /pair   Auth-1: a pairing token we issue       ┊
+        │  │  WSS  /acp    ACP JSON-RPC 2.0, relayed verbatim     ┊ FCM push
+        │  │  Loopback by default; a non-loopback bind without    ┊ (F-16, not
+        ▼  │  TLS is refused outright, not warned about.          ┊  built yet)
+┌──────────────────────────────────────────────────────────────────────┐
+│  BRIDGE HOST — a machine you run                              bridge/│
+│                                                                      │
+│  BridgeServer    Ktor CIO + WebSockets. Two routes, and no more.     │
+│  PairingService  Single-use codes, hashed device tokens, revocation. │
+│  SessionLog      Bounded per-session replay, keyed by the agent's    │
+│                  own messageId — or an explicit "that point is gone".│
+│  CliSupervisor   Supervises one CLI process; moves line-delimited    │
+│                  JSON-RPC both ways.  `_bridge/*` never reaches it.  │
+└──────────────────────────────────────────────────────────────────────┘
+                        │  stdio, ACP JSON-RPC
+┌──────────────────────────────────────────────────────────────────────┐
+│  kiro-cli acp --agent-engine v3 --auth-method cli                    │
+│  Those flags are not tuning: the default engine cannot see cloud     │
+│  sessions at all.  Owns Auth-2 — the user's real Kiro account and    │
+│  its own token store.  Signed in by `kiro-cli login` (device flow,   │
+│  relayed through the app — F-08) or by KIRO_API_KEY.                 │
+└──────────────────────────────────────────────────────────────────────┘
+                        │  Kiro's own protocol. Private, undocumented,
+                        ▼  and we never speak it — that is ADR-001.
+┌──────────────────────────────────────────────────────────────────────┐
+│  KIRO CLOUD — agent service + sandbox                                │
+│  Runs the turn, clones the bound repositories, commits, opens PRs.   │
+│  Does more than this project assumed, too: multi-client fan-out, and │
+│  permissions correlated by toolCallId, so an approval can be answered│
+│  on a connection other than the one that asked for it.               │
+└──────────────────────────────────────────────────────────────────────┘
+                        │  the Kiro account's own source-provider
+                        ▼  connection — not the bridge host's
+                GitHub / other providers (`_kiro/sourceProviders/*`)
+```
+
+Three things the picture is arguing, beyond naming the parts:
+
+- **`CloudSessionGateway` is the only backend abstraction in the app.** Screens never see a socket. If Kiro ever publishes an API, that is a second implementation of that one interface behind the same seam, not a rewrite — which is the actual decision recorded in [ADR-001 §3](docs/adr/ADR-001-cloud-session-access.md#3-decision).
+- **The two authentications are separate, and only the lower one is Kiro's.** The pairing token is ours and protects one WebSocket; the Kiro credential never leaves the bridge host's `kiro-cli` store. A compromised phone gets you a bridge, not an account. [AUTHENTICATION §1](docs/AUTHENTICATION.md#1-there-are-two-separate-authentications).
+- **The bottom two boxes are why the bridge host needs so little.** The clone, the commit and the PR all happen in Kiro's sandbox against the *account's* provider connection, so the box in the middle never holds your code or your git credentials.
+
+Two things the drawing flattens. An always-on bridge adds a hop on the top edge: the phone connects to `wss://your-hostname/acp`, Cloudflare's edge terminates TLS, and `cloudflared` on the host forwards to a bridge that stays bound to loopback — the setup [HOSTING.md](docs/HOSTING.md) covers. And the bottom two boxes are drawn from captured protocol frames and Kiro's docs, not from a cloud session this project has created: as above, no paid session has been run yet.
+
 ## Layout
 
 ```
