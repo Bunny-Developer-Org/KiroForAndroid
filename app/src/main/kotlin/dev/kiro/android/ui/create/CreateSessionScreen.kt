@@ -7,40 +7,30 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
-import dev.kiro.android.ui.common.NamedState
 import dev.kiro.android.ui.theme.KiroLayout
 import dev.kiro.android.ui.theme.KiroTheme
 import dev.kiro.core.model.AgentMode
 import dev.kiro.core.model.SourceProvider
-import dev.kiro.core.session.LayerState
 import dev.kiro.core.session.RepoSuggestion
 
 /**
@@ -57,8 +47,10 @@ import dev.kiro.core.session.RepoSuggestion
  *    have no repositories" — the failure F-11 specifically calls out.
  *
  * Takes [CreateSessionViewModel.State] rather than the view model itself, so
- * Compose previews keep working against plain data (ADR-004 §5's three picker
- * layers all show up here: catalog, recent, and manual entry).
+ * Compose previews keep working against plain data. ADR-004 §5's three picker
+ * layers — catalog, recent, and manual entry — live in [RepositoryPicker], which
+ * keeps them behind one closed control so this form's own Mode, First prompt and
+ * Start session controls stay on the first screen.
  *
  * Sections with hairline dividers, not a stack of bordered cards: this is the
  * densest form in the app and card-per-field is exactly what "reach for a card
@@ -91,7 +83,7 @@ fun CreateSessionScreen(
             .padding(KiroLayout.ScreenGutter),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        RepositorySection(
+        RepositoryPicker(
             state = state,
             onConnectProvider = onConnectProvider,
             onSetQuery = onSetQuery,
@@ -147,65 +139,10 @@ fun CreateSessionScreen(
     }
 }
 
+/** Shared with [RepositoryPicker], which is the other half of this form. */
 @Composable
-private fun SectionLabel(text: String) {
+internal fun SectionLabel(text: String) {
     Text(text, style = MaterialTheme.typography.labelLarge, color = KiroTheme.colors.muted)
-}
-
-/** A pill in [state.selected], removable — the fix for invisible manual entries. */
-@Composable
-private fun SelectedRepoPill(repo: RepoSuggestion, onRemove: () -> Unit) {
-    val colors = KiroTheme.colors
-    Row(
-        Modifier
-            .clip(MaterialTheme.shapes.extraSmall)
-            .background(colors.accentSubtle)
-            .heightIn(min = 36.dp)
-            .padding(start = 10.dp, end = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Column {
-            Text(repo.slug, style = MaterialTheme.typography.labelLarge, color = colors.textStrong)
-            repo.defaultBranch?.let {
-                Text(it, style = MaterialTheme.typography.labelMedium, color = colors.muted)
-            }
-        }
-        IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) {
-            Icon(
-                imageVector = Icons.Filled.Close,
-                contentDescription = "Remove ${repo.slug}",
-                tint = colors.muted,
-            )
-        }
-    }
-}
-
-@Composable
-private fun RepoPill(repo: RepoSuggestion, selected: Boolean, onToggle: () -> Unit) {
-    val colors = KiroTheme.colors
-    Row(
-        Modifier
-            .clip(MaterialTheme.shapes.extraSmall)
-            .background(if (selected) colors.accentSubtle else colors.bgElevated)
-            .clickable(onClick = onToggle)
-            .heightIn(min = 36.dp)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(
-            repo.slug,
-            style = MaterialTheme.typography.labelLarge,
-            color = if (selected) colors.textStrong else colors.text,
-        )
-        // Shown, not editable. See the class comment.
-        repo.defaultBranch?.let {
-            Text(it, style = MaterialTheme.typography.labelMedium, color = colors.muted)
-        }
-        if (repo.isPrivate) {
-            Text("private", style = MaterialTheme.typography.labelMedium, color = colors.muted)
-        }
-    }
 }
 
 @Composable
@@ -225,204 +162,6 @@ private fun ModePill(mode: AgentMode, selected: Boolean, onSelect: () -> Unit) {
             // Autonomy carries colour so the risk gradient is visible without
             // reading: this is the mode that acts unsupervised.
             color = if (mode.id == "autonomous") colors.warn else colors.text,
-        )
-    }
-}
-
-/**
- * Repository selection, extracted because it is the densest part of the densest
- * screen — and because the three constraints it has to communicate (fixed at
- * creation, no branch selection, provider must be connected) belong together.
- *
- * Rendering order matches ADR-004 §5: selected pills, then not-connected
- * providers, then recent repos, then a search box over the catalog, then
- * manual entry as a permanent fallback.
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun RepositorySection(
-    state: CreateSessionViewModel.State,
-    onConnectProvider: (SourceProvider) -> Unit,
-    onSetQuery: (String) -> Unit,
-    onSetManualEntry: (String) -> Unit,
-    onAddManual: () -> Unit,
-    onToggle: (RepoSuggestion) -> Unit,
-    onRemove: (String) -> Unit,
-    onRetryCatalog: () -> Unit,
-) {
-    val colors = KiroTheme.colors
-    val selectedSlugs = state.selected.map { it.slug }.toSet()
-
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionLabel("Repositories")
-
-        if (state.selected.isNotEmpty()) {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                state.selected.forEach { repo ->
-                    SelectedRepoPill(repo = repo, onRemove = { onRemove(repo.slug) })
-                }
-            }
-        }
-
-        NotConnectedProviderLines(state.providers, onConnectProvider)
-        RecentReposSection(state.recents, selectedSlugs, onToggle)
-
-        OutlinedTextField(
-            value = state.query,
-            onValueChange = onSetQuery,
-            label = { Text("Search your repositories") },
-            singleLine = true,
-            shape = MaterialTheme.shapes.small,
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        CatalogSection(state, selectedSlugs, onToggle, onConnectProvider, onRetryCatalog)
-        ManualEntrySection(state, onSetManualEntry, onAddManual)
-
-        if (state.selected.isNotEmpty()) {
-            Text(
-                "Repositories are fixed once the session starts, and Kiro cannot be " +
-                    "pointed at a branch — ask the agent to check one out or create one " +
-                    "after it is running.",
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.muted,
-            )
-        }
-    }
-}
-
-@Composable
-private fun NotConnectedProviderLines(
-    providers: List<SourceProvider>,
-    onConnectProvider: (SourceProvider) -> Unit,
-) {
-    val colors = KiroTheme.colors
-    providers.filter { it.connectionStatus != SourceProvider.ConnectionStatus.CONNECTED }
-        .forEach { provider ->
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = KiroLayout.TouchTarget)
-                    .clickable { onConnectProvider(provider) },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "${provider.displayName ?: provider.providerType} is not connected to " +
-                        "your Kiro account. Connect it in Kiro's settings to see its " +
-                        "repositories here.",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.warn,
-                )
-            }
-        }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun RecentReposSection(
-    recents: List<RepoSuggestion>,
-    selectedSlugs: Set<String>,
-    onToggle: (RepoSuggestion) -> Unit,
-) {
-    val notYetSelected = recents.filterNot { it.slug in selectedSlugs }
-    if (notYetSelected.isEmpty()) return
-
-    SectionLabel("Recent")
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        notYetSelected.forEach { repo ->
-            RepoPill(repo = repo, selected = false, onToggle = { onToggle(repo) })
-        }
-    }
-}
-
-/** Loading / failed / ready-but-empty, per ADR-004 §5 -- never a bare empty area. */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun CatalogSection(
-    state: CreateSessionViewModel.State,
-    selectedSlugs: Set<String>,
-    onToggle: (RepoSuggestion) -> Unit,
-    onConnectProvider: (SourceProvider) -> Unit,
-    onRetryCatalog: () -> Unit,
-) {
-    val colors = KiroTheme.colors
-    when (val catalog = state.catalog) {
-        LayerState.Loading -> Text(
-            "Loading your repositories…",
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.muted,
-        )
-
-        is LayerState.Failed -> NamedState(
-            title = "Could not load your repositories",
-            detail = catalog.reason,
-            action = {
-                TextButton(onClick = onRetryCatalog) { Text("Try again") }
-            },
-        )
-
-        is LayerState.Ready -> {
-            val allDisconnected = state.providers.isNotEmpty() &&
-                state.providers.all { it.connectionStatus != SourceProvider.ConnectionStatus.CONNECTED }
-            if (allDisconnected) {
-                NamedState(
-                    title = "Connect a provider to see your repositories",
-                    detail = "Kiro needs a connected GitHub or GitLab account before it can " +
-                        "list repositories here.",
-                    action = {
-                        TextButton(onClick = { state.providers.firstOrNull()?.let(onConnectProvider) }) {
-                            Text("Open Kiro settings")
-                        }
-                    },
-                )
-            } else {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    state.filteredCatalog.forEach { repo ->
-                        RepoPill(
-                            repo = repo,
-                            selected = repo.slug in selectedSlugs,
-                            onToggle = { onToggle(repo) },
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** A permanent affordance, never a failure state: the catalog can come back
- * empty for reasons unrelated to the user's repositories existing. */
-@Composable
-private fun ManualEntrySection(
-    state: CreateSessionViewModel.State,
-    onSetManualEntry: (String) -> Unit,
-    onAddManual: () -> Unit,
-) {
-    val colors = KiroTheme.colors
-    OutlinedTextField(
-        value = state.manualEntry,
-        onValueChange = onSetManualEntry,
-        label = { Text("Or type owner/repo") },
-        isError = state.manualError != null,
-        supportingText = {
-            Text(
-                state.manualError ?: "If a repository is rejected, the Kiro Agent app is " +
-                    "most likely not installed for it.",
-                color = if (state.manualError != null) colors.danger else colors.muted,
-            )
-        },
-        singleLine = true,
-        shape = MaterialTheme.shapes.small,
-        modifier = Modifier.fillMaxWidth(),
-    )
-    if (state.manualEntry.isNotBlank()) {
-        Text(
-            "Add \"${state.manualEntry.trim()}\"",
-            style = MaterialTheme.typography.labelLarge,
-            color = colors.accent,
-            modifier = Modifier
-                .heightIn(min = KiroLayout.TouchTarget)
-                .clickable(onClick = onAddManual),
         )
     }
 }
