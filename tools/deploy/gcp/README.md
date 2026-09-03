@@ -24,19 +24,21 @@ about **$3/month** and is not part of the free tier. See
 ["Outbound internet"](#outbound-internet-the-vm-needs-a-path-out-3month)
 below.
 
-## ⛔ The auth mode this script uses does not work for cloud sessions
+## Signing the bridge in
 
-`deploy.sh` writes `KIRO_API_KEY` into the systemd unit's environment. As of
-2026-09-03 that identity is rejected by Kiro's cloud-session surface — the
-bridge starts, pairs, and streams, but `session/new` comes back
-`UnauthorizedException`. Two different keys from a Kiro Pro+ account behaved
-identically while the same account's interactive login worked. Evidence and
-the reproduction are in
-[docs/AUTHENTICATION.md §3b](../../../docs/AUTHENTICATION.md).
+`deploy.sh` no longer provisions a `KIRO_API_KEY`; that mode is refuted for
+cloud sessions ([docs/AUTHENTICATION.md §3b](../../../docs/AUTHENTICATION.md)).
+The bridge instead expects an interactive `kiro-cli login` on the VM, which the
+script prints instructions for when it finishes. A bridge signed in this way was
+verified on 2026-09-03 to reach the account's real cloud sessions.
 
-The fix is an interactive `kiro-cli login` on the VM **and removing the key**,
-because `KIRO_API_KEY` overrides `--auth-method cli` whenever it is present.
-That is not yet implemented here.
+If `KIRO_API_KEY` happens to be set in your shell, the script warns and carries
+on — but be aware the variable overrides an interactive login, so a later
+`kiro-cli login` will not take effect while it is set.
+
+Headless sign-in is more awkward than it looks: the device flow silently picks
+the wrong identity, and the browser flow needs an `xdg-open` shim plus a
+forwarded callback port. AUTHENTICATION.md has the working procedure.
 
 ## Prerequisites
 

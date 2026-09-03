@@ -150,6 +150,41 @@ Both values are extractable, and **the verification URI already carries the user
 > provisions a bridge with a key and therefore produces a bridge that cannot
 > create sessions — see the note in [HOSTING.md](HOSTING.md).
 
+### Signing a headless bridge in (verified 2026-09-03)
+
+This is the procedure that replaces API-key provisioning, and it is not obvious:
+`kiro-cli login` on a VM with no GUI fails three different ways before it works.
+
+1. **`--use-device-flow` gets you the wrong account.** It completes without ever
+   offering a provider choice and lands on **Builder ID**. On an account whose
+   Pro+ plan is attached to the *Google* identity, that is a different Kiro
+   identity with the same email address: `session/list` returns 0 instead of 28,
+   and `kiro-cli chat --list-models` shows 4 models instead of 18 — no
+   `gpt-5.6-luna`, no `claude-opus-5`. The model count is the cheapest way to
+   tell the two apart, and it costs nothing.
+2. **Plain `kiro-cli login` needs a browser it cannot find.** The provider choice
+   happens *in the browser*, not in a TUI, so the browser flow is the only route
+   to Google. On a headless Debian image it dies with
+   `Failed to open browser` / `error: No such file or directory (os error 2)`.
+   `BROWSER` is ignored; **`xdg-open` is what it invokes.** A three-line shim at
+   `/usr/local/bin/xdg-open` that appends `"$@"` to a file captures the sign-in
+   URL instead of opening it.
+3. **The callback is a loopback listener on the VM, on a random port.** The URL
+   carries `redirect_uri=http://localhost:<port>`; the port changes on every
+   attempt, so read it from the URL rather than assuming. Forward it to the
+   machine holding the browser — `gcloud compute ssh … -- -L <port>:localhost:<port> -N`
+   — then open the URL there and pick Google. **Use `ServerAliveInterval` and
+   supervise the forward:** a plain one-shot forward dropped mid-login on the
+   first attempt here, and the browser's redirect landed on a dead port while
+   `kiro-cli` polled for five minutes and then failed. The browser sign-in
+   succeeds and the credential still never arrives, which is a confusing failure
+   to debug from either end.
+
+Confirmed working end to end: after this, `kiro-cli user whoami` on the VM reads
+`Logged in with Google`, the model list has 18 entries, and an ACP probe run *on
+the VM* answers `session/list: OK -> 28 session(s)` — the same count the
+developer's own machine returns.
+
 This gives Auth-2 a second, much simpler shape:
 
 | | Device-flow relay (§3) | API key |

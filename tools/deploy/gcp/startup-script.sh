@@ -74,15 +74,25 @@ fi
 # the startup-script body, and is written straight to a root-only-readable
 # env file rather than exported into this script's own environment or logged
 # by the `tee` above.
+# An EMPTY key is the normal case now, and it must produce a file with no
+# KIRO_API_KEY line at all rather than an empty assignment: the variable's mere
+# presence selects api_key mode and overrides an interactive `kiro-cli login`,
+# and that mode was refuted for cloud sessions on 2026-09-03
+# (docs/AUTHENTICATION.md §3b). An empty value would therefore break the very
+# login this now expects you to perform.
 umask 077
 curl -sf -H "Metadata-Flavor: Google" \
   "http://metadata.google.internal/computeMetadata/v1/instance/attributes/kiro-api-key" \
-  > /etc/kiro-bridge.env.tmp
-{
-  printf 'KIRO_API_KEY='
-  cat /etc/kiro-bridge.env.tmp
-  printf '\n'
-} > /etc/kiro-bridge.env
+  > /etc/kiro-bridge.env.tmp || true
+if [ -s /etc/kiro-bridge.env.tmp ]; then
+  {
+    printf 'KIRO_API_KEY='
+    cat /etc/kiro-bridge.env.tmp
+    printf '\n'
+  } > /etc/kiro-bridge.env
+else
+  : > /etc/kiro-bridge.env
+fi
 rm -f /etc/kiro-bridge.env.tmp
 chown root:bridge /etc/kiro-bridge.env
 chmod 640 /etc/kiro-bridge.env

@@ -25,20 +25,15 @@ paid-resource rates added later in §3 are approximate and were *not*
 re-fetched — §3 says exactly which is which.
 
 
-> **⛔ Read this before running anything here (2026-09-03).** These scripts
-> provision the bridge with a `KIRO_API_KEY`, and a bridge authenticated that
-> way **cannot create cloud sessions** — the service rejects `session/list`,
-> `_kiro/sourceProviders/list` and `session/new` alike with
-> `UnauthorizedException`. Verified on two separate keys from a Kiro Pro+
-> account, with an interactive login working against the same server seconds
-> apart; the full evidence is in
-> [AUTHENTICATION.md §3b](AUTHENTICATION.md#3b-alternative-for-auth-2--api-key-provisioning-verified-2026-09-02).
-> So a VM built by `deploy.sh` today comes up healthy, pairs with the phone,
-> and then fails at the one thing the app exists to do. Until the deploy path
-> is switched to an interactive `kiro-cli login` on the VM — and `KIRO_API_KEY`
-> is left *unset*, because its mere presence overrides the login — treat this
-> document as describing hosting mechanics that work, wrapped around an auth
-> mode that does not.
+> **Note (2026-09-03).** These scripts used to provision the bridge with a
+> `KIRO_API_KEY`, and that turned out to produce a bridge that pairs with the
+> phone and then cannot create a session — the mode is refuted in
+> [AUTHENTICATION.md §3b](AUTHENTICATION.md). They now default to no key and an
+> interactive `kiro-cli login` on the VM instead. That path **is verified**: a
+> bridge provisioned this way answers `session/list` with the account's real
+> sessions. The login itself is fiddly on a headless host — see "Signing a
+> headless bridge in" in AUTHENTICATION.md, which is the procedure that works
+> and the three ways it fails first.
 
 ## Which shape is which: what runs where
 

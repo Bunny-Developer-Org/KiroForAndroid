@@ -19,12 +19,13 @@
 # same outcome). Set EXTERNAL_IP=none if your subnet already has NAT.
 # docs/HOSTING.md §3 has the cost table and how approximate those rates are.
 #
-# KNOWN BROKEN as of 2026-09-03: the KIRO_API_KEY this script provisions is
-# rejected by Kiro's cloud-session surface, so the bridge it builds pairs with
-# the phone and then cannot create a session. Two keys from a Pro+ account,
-# same result; the same account's interactive login works. See
-# docs/AUTHENTICATION.md §3b. Fixing it means `kiro-cli login` on the VM with
-# KIRO_API_KEY unset — the variable wins over --auth-method cli whenever set.
+# This script no longer provisions a KIRO_API_KEY: that mode is rejected by
+# Kiro's cloud-session surface (two keys from a Pro+ account, 2026-09-03; see
+# docs/AUTHENTICATION.md §3b). It provisions an unauthenticated bridge and
+# tells you to run `kiro-cli login` on the VM afterwards. That path is verified
+# end to end — a bridge signed in this way answers session/list with the
+# account's real sessions. Headless sign-in has three separate traps; the
+# working procedure is in AUTHENTICATION.md.
 #
 # What this deliberately does NOT do: bind the bridge to a public address.
 # BridgeConfig.validate() refuses a non-loopback bind without a TLS
@@ -53,19 +54,25 @@ if [ -z "$PROJECT_ID" ]; then
   exit 1
 fi
 
-if [ -z "${KIRO_API_KEY:-}" ]; then
-  if [ -t 0 ]; then
-    read -rsp "KIRO_API_KEY (from your Kiro account settings, see docs/AUTHENTICATION.md §3b): " KIRO_API_KEY
-    echo
-  else
-    echo "KIRO_API_KEY is not set and this shell has no TTY to prompt on." >&2
-    echo "Export it first: export KIRO_API_KEY=..." >&2
-    exit 1
-  fi
-fi
-if [ -z "$KIRO_API_KEY" ]; then
-  echo "Empty KIRO_API_KEY — refusing to provision a bridge with no way to sign in." >&2
-  exit 1
+# KIRO_API_KEY is now OPT-IN and discouraged. It used to be required here, on
+# the strength of AUTHENTICATION.md §3b's claim that the mode reaches cloud
+# sessions. That was refuted on 2026-09-03: two keys from a Kiro Pro+ account
+# were both refused (`UnauthorizedException`) for session/list, session/new and
+# sourceProviders/list, while the same account's interactive login worked
+# against the same server. A key-provisioned bridge pairs with the phone and
+# then cannot create a session — which is the entire point of the app.
+#
+# So the default is now no key at all, and `kiro-cli login` on the VM after
+# this script finishes. That step needs a browser and cannot be automated
+# (A6: the provider picker is a TUI), so it stays manual and this script tells
+# you exactly what to run.
+if [ -n "${KIRO_API_KEY:-}" ]; then
+  echo "WARNING: KIRO_API_KEY is set, so this bridge will authenticate as that key." >&2
+  echo "         Cloud sessions were refused for API-key identities on 2026-09-03" >&2
+  echo "         (docs/AUTHENTICATION.md §3b). The variable also overrides an" >&2
+  echo "         interactive login, so a later 'kiro-cli login' will NOT take" >&2
+  echo "         effect while it is set. Unset it unless you know you want this." >&2
+  echo >&2
 fi
 
 echo "==> project=$PROJECT_ID zone=$ZONE instance=$INSTANCE_NAME machine=$MACHINE_TYPE"
@@ -118,7 +125,7 @@ if gcloud compute instances describe "$INSTANCE_NAME" --zone="$ZONE" --project="
 else
   KEY_FILE="$(mktemp)"
   trap 'rm -f "$KEY_FILE"' EXIT
-  printf '%s' "$KIRO_API_KEY" > "$KEY_FILE"
+  printf '%s' "${KIRO_API_KEY:-}" > "$KEY_FILE"
 
   gcloud compute instances create "$INSTANCE_NAME" \
     --project="$PROJECT_ID" \
@@ -199,6 +206,19 @@ Reach it one of two ways:
 
   2. Always reachable, from anywhere: run tools/deploy/cloudflare/setup-tunnel.sh
      against this same VM. See docs/HOSTING.md for the combined recipe.
+
+FIRST, SIGN THE BRIDGE IN. Until you do, it can pair with the phone but every
+cloud call will come back "Authentication required or access denied":
+
+  gcloud compute ssh $INSTANCE_NAME --zone=$ZONE --project=$PROJECT_ID \\
+    --tunnel-through-iap --command="sudo runuser -u bridge -- env HOME=/home/bridge \\
+      /home/bridge/.local/bin/kiro-cli login"
+
+It prints a URL to open in your own browser. Then restart the bridge so it
+picks the credential up:
+
+  gcloud compute ssh $INSTANCE_NAME --zone=$ZONE --project=$PROJECT_ID \\
+    --tunnel-through-iap --command="sudo systemctl restart kiro-bridge"
 
 The pairing code was printed on the bridge's first start — see it with:
   gcloud compute ssh $INSTANCE_NAME --zone=$ZONE --project=$PROJECT_ID \\
