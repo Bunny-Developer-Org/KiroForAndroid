@@ -241,7 +241,7 @@ private suspend fun reconnectLoop(
 ) {
     val backoff = Backoff()
     while (true) {
-        runCatching { ServiceLocator.connect(bridge.url, token) }
+        runCatching { ServiceLocator.connect(bridge.url, token, bridge.authMode) }
             .onSuccess { activeGtw ->
                 backoff.reset()
                 setGateway(activeGtw)

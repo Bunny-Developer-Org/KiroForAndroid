@@ -14,6 +14,7 @@ import dev.kiro.android.service.ConnectivityObserver
 import dev.kiro.core.acp.AcpClient
 import dev.kiro.core.auth.BridgeRegistry
 import dev.kiro.core.auth.TokenStore
+import dev.kiro.core.auth.PairedBridge
 import dev.kiro.core.session.BridgeGateway
 import dev.kiro.core.session.CloudSessionGateway
 import dev.kiro.core.session.FakeGateway
@@ -62,7 +63,11 @@ object ServiceLocator {
      */
     fun gateway(): CloudSessionGateway = activeGateway ?: FakeGateway()
 
-    suspend fun connect(url: String, token: String): CloudSessionGateway {
+    suspend fun connect(
+        url: String,
+        token: String,
+        authMode: PairedBridge.AuthMode = PairedBridge.AuthMode.UNKNOWN,
+    ): CloudSessionGateway {
         // MainActivity's reconnect loop calls this every 2s until it succeeds; without
         // closing what came before, each attempt leaks a socket and a pump coroutine
         // rather than replacing the last one.
@@ -70,7 +75,11 @@ object ServiceLocator {
         activeGateway = null
         val transport = WebSocketAcpTransport(url, token)
         val client = AcpClient(transport, scope, logger, metrics)
-        val gateway = BridgeGateway(client, scope, logger, metrics)
+        // Passed so an unauthorised cloud call can name the likely cause. A bridge
+        // authenticated by KIRO_API_KEY was refused for cloud sessions on a Pro+
+        // account on 2026-09-03 (two keys, docs/AUTHENTICATION.md §3b), so blaming
+        // the plan first — as this used to — sends the reader the wrong way.
+        val gateway = BridgeGateway(client, scope, logger, metrics, authMode)
         try {
             gateway.connect()
         } catch (e: Throwable) {
