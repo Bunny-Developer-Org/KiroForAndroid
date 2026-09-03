@@ -50,7 +50,6 @@ public class TranscriptReducer(
 
     @Suppress("CyclomaticComplexMethod")
     public fun reduce(state: State, update: SessionUpdate): State = when (update) {
-
         is SessionUpdate.AgentMessageChunk ->
             state.copy(streamingText = state.streamingText + update.text)
 

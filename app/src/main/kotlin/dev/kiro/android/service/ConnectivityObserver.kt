@@ -41,21 +41,24 @@ class ConnectivityObserver(context: Context) {
         val request = NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .build()
-        connectivityManager.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
-            override fun onLost(network: Network) {
-                // Only a total loss counts -- losing one of several networks
-                // while another still satisfies the request is not a drop.
-                if (connectivityManager.activeNetwork == null) {
-                    wasDown = true
+        connectivityManager.registerNetworkCallback(
+            request,
+            object : ConnectivityManager.NetworkCallback() {
+                override fun onLost(network: Network) {
+                    // Only a total loss counts -- losing one of several networks
+                    // while another still satisfies the request is not a drop.
+                    if (connectivityManager.activeNetwork == null) {
+                        wasDown = true
+                    }
                 }
-            }
 
-            override fun onAvailable(network: Network) {
-                if (wasDown) {
-                    wasDown = false
-                    regained.tryEmit(Unit)
+                override fun onAvailable(network: Network) {
+                    if (wasDown) {
+                        wasDown = false
+                        regained.tryEmit(Unit)
+                    }
                 }
             }
-        })
+        )
     }
 }

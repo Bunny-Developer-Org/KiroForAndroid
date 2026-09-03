@@ -1,5 +1,6 @@
 package dev.kiro.android.ui.theme
 
+import android.provider.Settings
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -17,7 +18,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import android.provider.Settings
 
 val LocalKiroColors = staticCompositionLocalOf<KiroColors> { error("KiroTheme missing") }
 
@@ -33,7 +33,8 @@ val LocalReduceMotion = staticCompositionLocalOf { false }
 
 object KiroTheme {
     val colors: KiroColors
-        @Composable @ReadOnlyComposable get() = LocalKiroColors.current
+        @Composable @ReadOnlyComposable
+        get() = LocalKiroColors.current
 }
 
 @Composable

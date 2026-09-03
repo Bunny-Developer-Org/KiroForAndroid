@@ -67,8 +67,7 @@ public class SessionLog(private val capacity: Int) {
 }
 
 /** `params.update._meta.kiro`, where a `session/update` puts its message id. */
-private fun kotlinx.serialization.json.JsonElement?.updateMeta():
-    kotlinx.serialization.json.JsonObject? =
+private fun kotlinx.serialization.json.JsonElement?.updateMeta(): kotlinx.serialization.json.JsonObject? =
     (this as? kotlinx.serialization.json.JsonObject)
         ?.get("update")
         ?.kiroMeta()

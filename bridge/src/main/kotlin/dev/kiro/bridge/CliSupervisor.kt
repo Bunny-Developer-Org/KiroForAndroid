@@ -55,8 +55,10 @@ public class CliSupervisor(
         val builder = ProcessBuilder(
             config.kiroCliPath,
             "acp",
-            "--agent-engine", AGENT_ENGINE,
-            "--auth-method", AUTH_METHOD,
+            "--agent-engine",
+            AGENT_ENGINE,
+            "--auth-method",
+            AUTH_METHOD,
         ).directory(config.workingDirectory)
 
         // Explicit, not inherited. See BridgeConfig.childEnvironment.

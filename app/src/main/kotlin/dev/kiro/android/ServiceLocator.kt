@@ -13,8 +13,8 @@ import dev.kiro.android.platform.WebSocketAcpTransport
 import dev.kiro.android.service.ConnectivityObserver
 import dev.kiro.core.acp.AcpClient
 import dev.kiro.core.auth.BridgeRegistry
-import dev.kiro.core.auth.TokenStore
 import dev.kiro.core.auth.PairedBridge
+import dev.kiro.core.auth.TokenStore
 import dev.kiro.core.session.BridgeGateway
 import dev.kiro.core.session.CloudSessionGateway
 import dev.kiro.core.session.FakeGateway

@@ -273,8 +273,13 @@ public class FakeGateway(
         )
 
         val SCRIPTED_REPLY = listOf(
-            "I looked at ", "the repository ", "and the build ", "is green. ",
-            "The failing test ", "was a stale fixture; ", "I have opened a PR.",
+            "I looked at ",
+            "the repository ",
+            "and the build ",
+            "is green. ",
+            "The failing test ",
+            "was a stale fixture; ",
+            "I have opened a PR.",
         )
 
         val defaultSessions = listOf(

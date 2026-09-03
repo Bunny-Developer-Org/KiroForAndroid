@@ -9,13 +9,13 @@ import dev.kiro.core.model.UserInputRequest
 import dev.kiro.core.session.CloudSessionGateway
 import dev.kiro.core.session.PromptBlock
 import dev.kiro.core.session.TranscriptReducer
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
 import java.util.concurrent.ConcurrentLinkedQueue
 
 /**

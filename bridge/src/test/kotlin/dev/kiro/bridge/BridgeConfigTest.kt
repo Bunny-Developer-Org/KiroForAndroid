@@ -70,8 +70,14 @@ class BridgeConfigTest {
 
     private companion object {
         val ALLOWED = setOf(
-            "HOME", "PATH", "LANG", "LC_ALL", "TMPDIR",
-            "XDG_DATA_HOME", "XDG_CONFIG_HOME", "KIRO_API_KEY",
+            "HOME",
+            "PATH",
+            "LANG",
+            "LC_ALL",
+            "TMPDIR",
+            "XDG_DATA_HOME",
+            "XDG_CONFIG_HOME",
+            "KIRO_API_KEY",
         )
     }
 }

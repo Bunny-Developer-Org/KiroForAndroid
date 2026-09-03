@@ -468,7 +468,12 @@ class BridgeGatewayTest {
                         put(
                             "options",
                             buildJsonArray {
-                                add(buildJsonObject { put("value", "auto"); put("name", "Auto") })
+                                add(
+                                    buildJsonObject {
+                                        put("value", "auto")
+                                        put("name", "Auto")
+                                    },
+                                )
                                 add(
                                     buildJsonObject {
                                         put("value", "claude-opus-5")

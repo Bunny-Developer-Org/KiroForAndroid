@@ -1,5 +1,6 @@
 package dev.kiro.bridge
 
+import dev.kiro.core.acp.AcpJson
 import dev.kiro.core.acp.JsonRpcCodec
 import dev.kiro.core.acp.RpcError
 import dev.kiro.core.acp.RpcId
@@ -8,18 +9,17 @@ import dev.kiro.core.acp.RpcNotification
 import dev.kiro.core.acp.RpcRequest
 import dev.kiro.core.acp.RpcResponse
 import dev.kiro.core.acp.str
-import dev.kiro.core.acp.AcpJson
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.install
-import io.ktor.server.plugins.origin
-import io.ktor.server.request.receiveText
-import io.ktor.server.response.respondText
-import io.ktor.server.routing.post
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
+import io.ktor.server.plugins.origin
 import io.ktor.server.request.header
+import io.ktor.server.request.receiveText
+import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
+import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.pingPeriod
@@ -101,87 +101,87 @@ public class BridgeServer(
      * everything it can do is bounded by [PairingService].
      */
     private fun Route.installRoutes() {
-                // Auth-1's only unauthenticated endpoint, and the one the app hits
-                // first. Everything it can do is bounded by PairingService: the
-                // code is single-use, short-lived, and rate limited per address.
-                post("/pair") {
-                    val body = runCatching {
-                        AcpJson.parseToJsonElement(call.receiveText()) as? JsonObject
-                    }.getOrNull()
-                    val code = body?.str("code")
-                    val deviceName = body?.str("deviceName") ?: "Unnamed device"
-                    val remote = call.request.origin.remoteHost
+        // Auth-1's only unauthenticated endpoint, and the one the app hits
+        // first. Everything it can do is bounded by PairingService: the
+        // code is single-use, short-lived, and rate limited per address.
+        post("/pair") {
+            val body = runCatching {
+                AcpJson.parseToJsonElement(call.receiveText()) as? JsonObject
+            }.getOrNull()
+            val code = body?.str("code")
+            val deviceName = body?.str("deviceName") ?: "Unnamed device"
+            val remote = call.request.origin.remoteHost
 
-                    if (code == null) {
-                        call.respondText(
-                            status = HttpStatusCode.BadRequest,
-                            contentType = ContentType.Application.Json,
-                            text = errorBody("A pairing code is required."),
-                        )
-                        return@post
-                    }
+            if (code == null) {
+                call.respondText(
+                    status = HttpStatusCode.BadRequest,
+                    contentType = ContentType.Application.Json,
+                    text = errorBody("A pairing code is required."),
+                )
+                return@post
+            }
 
-                    when (val result = pairing.redeem(code, deviceName, remote)) {
-                        is PairingService.PairResult.Paired -> call.respondText(
-                            contentType = ContentType.Application.Json,
-                            text = buildJsonObject {
-                                put("token", result.token)
-                                put("authMode", if (config.apiKey != null) "api_key" else "cli_login")
-                            }.toString(),
-                        )
+            when (val result = pairing.redeem(code, deviceName, remote)) {
+                is PairingService.PairResult.Paired -> call.respondText(
+                    contentType = ContentType.Application.Json,
+                    text = buildJsonObject {
+                        put("token", result.token)
+                        put("authMode", if (config.apiKey != null) "api_key" else "cli_login")
+                    }.toString(),
+                )
 
-                        // Deliberately distinct messages. F-07 requires error states
-                        // that say what to do next, and "wrong code" and "too late"
-                        // have different next steps.
-                        is PairingService.PairResult.BadCode -> call.respondText(
-                            status = HttpStatusCode.Forbidden,
-                            contentType = ContentType.Application.Json,
-                            text = errorBody("That pairing code is not valid. Check it and try again."),
-                        )
+                // Deliberately distinct messages. F-07 requires error states
+                // that say what to do next, and "wrong code" and "too late"
+                // have different next steps.
+                is PairingService.PairResult.BadCode -> call.respondText(
+                    status = HttpStatusCode.Forbidden,
+                    contentType = ContentType.Application.Json,
+                    text = errorBody("That pairing code is not valid. Check it and try again."),
+                )
 
-                        is PairingService.PairResult.Expired -> call.respondText(
-                            status = HttpStatusCode.Forbidden,
-                            contentType = ContentType.Application.Json,
-                            text = errorBody(
-                                "That pairing code has expired. Run the bridge with --pair " +
-                                    "to print a new one.",
-                            ),
-                        )
+                is PairingService.PairResult.Expired -> call.respondText(
+                    status = HttpStatusCode.Forbidden,
+                    contentType = ContentType.Application.Json,
+                    text = errorBody(
+                        "That pairing code has expired. Run the bridge with --pair " +
+                            "to print a new one.",
+                    ),
+                )
 
-                        is PairingService.PairResult.RateLimited -> call.respondText(
-                            status = HttpStatusCode.TooManyRequests,
-                            contentType = ContentType.Application.Json,
-                            text = errorBody(
-                                "Too many attempts. Wait ${result.retryAfterSeconds}s and try again.",
-                            ),
-                        )
-                    }
+                is PairingService.PairResult.RateLimited -> call.respondText(
+                    status = HttpStatusCode.TooManyRequests,
+                    contentType = ContentType.Application.Json,
+                    text = errorBody(
+                        "Too many attempts. Wait ${result.retryAfterSeconds}s and try again.",
+                    ),
+                )
+            }
+        }
+
+        webSocket("/acp") {
+            val token = call.request.header(HEADER_TOKEN)
+                ?: call.request.queryParameters[QUERY_TOKEN]
+
+            if (!pairing.isAuthorised(token)) {
+                log.warn("rejecting unauthorised connection")
+                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "not paired"))
+                return@webSocket
+            }
+
+            val connection = ClientConnection { text -> outgoing.send(Frame.Text(text)) }
+            clients.add(connection)
+            log.info("client attached ({} total)", clients.size)
+
+            try {
+                for (frame in incoming) {
+                    if (frame !is Frame.Text) continue
+                    handleClientFrame(frame.readText(), connection)
                 }
-
-                webSocket("/acp") {
-                    val token = call.request.header(HEADER_TOKEN)
-                        ?: call.request.queryParameters[QUERY_TOKEN]
-
-                    if (!pairing.isAuthorised(token)) {
-                        log.warn("rejecting unauthorised connection")
-                        close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "not paired"))
-                        return@webSocket
-                    }
-
-                    val connection = ClientConnection { text -> outgoing.send(Frame.Text(text)) }
-                    clients.add(connection)
-                    log.info("client attached ({} total)", clients.size)
-
-                    try {
-                        for (frame in incoming) {
-                            if (frame !is Frame.Text) continue
-                            handleClientFrame(frame.readText(), connection)
-                        }
-                    } finally {
-                        clients.remove(connection)
-                        log.info("client detached ({} remain)", clients.size)
-                    }
-                }
+            } finally {
+                clients.remove(connection)
+                log.info("client detached ({} remain)", clients.size)
+            }
+        }
     }
 
     private fun recordForReplay(notification: RpcNotification) {

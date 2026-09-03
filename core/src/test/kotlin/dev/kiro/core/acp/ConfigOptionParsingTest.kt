@@ -45,7 +45,12 @@ class ConfigOptionParsingTest {
         val selection = ConfigOptionParser.parse(
             configOptions(
                 option("model", "Model", "model", "claude-opus-5") {
-                    add(buildJsonObject { put("value", "claude-opus-5"); put("name", "Claude Opus 5") })
+                    add(
+                        buildJsonObject {
+                            put("value", "claude-opus-5")
+                            put("name", "Claude Opus 5")
+                        },
+                    )
                 },
             ),
         ).modelSelection()
@@ -66,7 +71,12 @@ class ConfigOptionParsingTest {
         val selection = ConfigOptionParser.parse(
             configOptions(
                 option("model", "Model", "model", "retired-model") {
-                    add(buildJsonObject { put("value", "auto"); put("name", "Auto") })
+                    add(
+                        buildJsonObject {
+                            put("value", "auto")
+                            put("name", "Auto")
+                        },
+                    )
                 },
             ),
         ).modelSelection()
@@ -82,10 +92,20 @@ class ConfigOptionParsingTest {
         val options = ConfigOptionParser.parse(
             configOptions(
                 option("somethingNew", "Something New", null, "on") {
-                    add(buildJsonObject { put("value", "on"); put("name", "On") })
+                    add(
+                        buildJsonObject {
+                            put("value", "on")
+                            put("name", "On")
+                        },
+                    )
                 },
                 option("model", "Model", "model", "auto") {
-                    add(buildJsonObject { put("value", "auto"); put("name", "Auto") })
+                    add(
+                        buildJsonObject {
+                            put("value", "auto")
+                            put("name", "Auto")
+                        },
+                    )
                 },
             ),
         )
@@ -100,7 +120,12 @@ class ConfigOptionParsingTest {
         val selection = ConfigOptionParser.parse(
             configOptions(
                 option("modelSelect", "Model", ConfigOption.MODEL, "auto") {
-                    add(buildJsonObject { put("value", "auto"); put("name", "Auto") })
+                    add(
+                        buildJsonObject {
+                            put("value", "auto")
+                            put("name", "Auto")
+                        },
+                    )
                 },
             ),
         ).modelSelection()
@@ -114,7 +139,12 @@ class ConfigOptionParsingTest {
             configOptions(
                 option("model", "Model", "model", "auto") {
                     add(buildJsonObject { put("name", "Nameless") })
-                    add(buildJsonObject { put("value", "auto"); put("name", "Auto") })
+                    add(
+                        buildJsonObject {
+                            put("value", "auto")
+                            put("name", "Auto")
+                        },
+                    )
                 },
             ),
         ).modelSelection()

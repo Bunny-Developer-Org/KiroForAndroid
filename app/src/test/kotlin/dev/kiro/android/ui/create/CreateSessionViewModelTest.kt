@@ -24,8 +24,8 @@ import dev.kiro.core.session.RepoCatalog
 import dev.kiro.core.session.RepoSuggestion
 import dev.kiro.core.session.RosterChange
 import dev.kiro.core.session.SessionLimitReachedException
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow

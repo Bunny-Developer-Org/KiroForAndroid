@@ -73,7 +73,7 @@ Commands, in the order CI runs them:
 
 ```bash
 ./gradlew :core:corePurityCheck      # the one hard rule, checked first (§5)
-./gradlew detekt                     # static analysis, maxIssues: 0
+./gradlew detekt                     # static analysis + ktlint formatting rules, maxIssues: 0
 ./gradlew :core:test :bridge:test    # JVM unit tests
 ./gradlew :app:assembleDebug :bridge:installDist
 ```

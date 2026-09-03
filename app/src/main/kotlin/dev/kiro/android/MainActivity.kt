@@ -20,9 +20,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import dev.kiro.android.platform.PairingClient
 import dev.kiro.android.service.Backoff
+import dev.kiro.android.ui.AppNavigation
 import dev.kiro.android.ui.bridges.BridgeListScreen
 import dev.kiro.android.ui.onboarding.PairingScreen
-import dev.kiro.android.ui.AppNavigation
 import dev.kiro.android.ui.theme.KiroTheme
 import dev.kiro.core.auth.PairedBridge
 import dev.kiro.core.session.CloudSessionGateway
