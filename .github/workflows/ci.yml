@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -36,7 +37,7 @@ jobs:
         run: ./gradlew detekt
 
       - name: Unit tests
-        run: ./gradlew :core:test :bridge:test
+        run: ./gradlew :core:test :bridge:test :app:testDebugUnitTest
 
       - name: Assemble
         run: ./gradlew :app:assembleDebug :bridge:installDist
