@@ -13,6 +13,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import dev.kiro.core.acp.AcpJson
 import dev.kiro.core.auth.BridgeRegistry
 import dev.kiro.core.auth.PairedBridge
+import dev.kiro.core.model.KiroModel
+import dev.kiro.core.session.ModelCatalogStore
 import dev.kiro.core.session.RecentRepo
 import dev.kiro.core.session.RecentRepoStore
 import dev.kiro.core.util.DriftMetrics
@@ -31,6 +33,7 @@ import java.util.concurrent.atomic.AtomicLong
 private val Context.bridgeDataStore: DataStore<Preferences> by preferencesDataStore("kiro_bridges")
 private val Context.pinnedSessionsDataStore: DataStore<Preferences> by preferencesDataStore("kiro_pinned_sessions")
 private val Context.recentReposDataStore: DataStore<Preferences> by preferencesDataStore("kiro_recent_repos")
+private val Context.modelCatalogDataStore: DataStore<Preferences> by preferencesDataStore("kiro_model_catalog")
 
 class AndroidLogger(private val tag: String = "Kiro") : Logger {
     override fun debug(message: String) { Log.d(tag, message) }
@@ -209,6 +212,68 @@ class DataStorePinnedSessionStore(private val context: Context) : PinnedSessionS
             prefs[key] = if (sessionId in current) current - sessionId else current + sessionId
         }
     }
+}
+
+/**
+ * The last model catalogue the agent published (see [ModelCatalogStore]).
+ *
+ * Same shape as [DataStoreRecentRepoStore]: one [StringStore] slot holding a
+ * JSON array, so the round trip is testable without DataStore. Whole-list
+ * replace rather than merge -- unlike recent repositories, this is not an
+ * accumulated history but a snapshot of what the agent currently offers, and a
+ * model Kiro has withdrawn should disappear from the picker rather than linger
+ * because it was once seen.
+ *
+ * A malformed or partly unreadable entry is skipped rather than thrown on: a
+ * remembered catalogue is a convenience, and failing to open the create screen
+ * over one would be a far worse outcome than offering a shorter list.
+ */
+class DataStoreModelCatalogStore(private val stringStore: StringStore) : ModelCatalogStore {
+
+    constructor(context: Context) : this(
+        DataStorePreferenceStringStore(context.modelCatalogDataStore, stringPreferencesKey("models")),
+    )
+
+    override suspend fun read(): List<KiroModel> {
+        val raw = stringStore.read() ?: return emptyList()
+        val array = runCatching { AcpJson.parseToJsonElement(raw) as? JsonArray }.getOrNull()
+            ?: return emptyList()
+        return array.mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            val id = obj.modelString("id") ?: return@mapNotNull null
+            KiroModel(
+                id = id,
+                name = obj.modelString("name") ?: id,
+                description = obj.modelString("description"),
+                // Stored as a string so a locale with a comma decimal separator
+                // cannot round-trip 2.2 into something unparseable, and dropped
+                // rather than defaulted when it will not parse -- the protocol's
+                // silence about a rate means "not stated", never "1x".
+                rateMultiplier = obj.modelString("rateMultiplier")?.toDoubleOrNull(),
+                rateUnit = obj.modelString("rateUnit"),
+            )
+        }
+    }
+
+    override suspend fun write(models: List<KiroModel>) {
+        val encoded = buildJsonArray {
+            models.forEach { model ->
+                add(
+                    buildJsonObject {
+                        put("id", model.id)
+                        put("name", model.name)
+                        model.description?.let { put("description", it) }
+                        model.rateMultiplier?.let { put("rateMultiplier", it.toString()) }
+                        model.rateUnit?.let { put("rateUnit", it) }
+                    },
+                )
+            }
+        }.toString()
+        stringStore.write(encoded)
+    }
+
+    private fun JsonObject.modelString(name: String): String? =
+        (this[name] as? JsonPrimitive)?.takeIf { it.isString }?.content
 }
 
 /**

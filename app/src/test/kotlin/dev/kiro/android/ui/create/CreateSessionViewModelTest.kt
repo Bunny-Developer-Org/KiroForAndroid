@@ -2,9 +2,11 @@ package dev.kiro.android.ui.create
 
 import app.cash.turbine.test
 import dev.kiro.core.acp.SessionUpdate
+import dev.kiro.core.acp.TransportClosedException
 import dev.kiro.core.model.CloudSession
 import dev.kiro.core.model.ExecutionTarget
 import dev.kiro.core.model.InstanceStatus
+import dev.kiro.core.model.KiroModel
 import dev.kiro.core.model.ListScope
 import dev.kiro.core.model.PermissionRequest
 import dev.kiro.core.model.RepoCandidate
@@ -58,9 +60,13 @@ private class TestGateway(
     override val rosterChanges: Flow<RosterChange> = MutableSharedFlow()
 
     var lastPrompt: Pair<String, List<PromptBlock>>? = null
+    var lastRequest: CreateSessionRequest? = null
 
     override suspend fun listSessions(source: SessionSource, scope: ListScope): List<CloudSession> = emptyList()
-    override suspend fun createSession(request: CreateSessionRequest): CloudSession = onCreate(request)
+    override suspend fun createSession(request: CreateSessionRequest): CloudSession {
+        lastRequest = request
+        return onCreate(request)
+    }
     override suspend fun loadSession(sessionId: String, source: SessionSource) = Unit
     override suspend fun prompt(sessionId: String, blocks: List<PromptBlock>): String? {
         lastPrompt = sessionId to blocks
@@ -255,5 +261,103 @@ class CreateSessionViewModelTest {
         assertEquals(expectedNoteUsed, catalog.noteUsedCalls)
         assertNull(viewModel.state.value.error)
         assertEquals(false, viewModel.state.value.busy)
+    }
+
+    /**
+     * The gap the create screen used to have: no model control at all, so a
+     * session always started on whatever the sandbox defaulted to and the only
+     * way to change it was to open the transcript afterwards.
+     *
+     * The id travels on [CreateSessionRequest.modelId], which the gateway applies
+     * *after* the session exists -- KAS's cloud create drops a requested model
+     * outright (PROTOCOL-FINDINGS §4d).
+     */
+    @Test
+    fun `the chosen model is sent with the create request`() = runTest {
+        val gateway = TestGateway()
+        val viewModel = CreateSessionViewModel(gateway, TestRepoCatalog(), initialRepos = listOf("owner/repo"))
+
+        viewModel.setModel("claude-opus-5")
+        viewModel.create("do it", "vibe") {}
+
+        assertEquals("claude-opus-5", gateway.lastRequest?.modelId)
+    }
+
+    /** No preference is a real answer, and must not become a guessed default. */
+    @Test
+    fun `no model choice sends none`() = runTest {
+        val gateway = TestGateway()
+        val viewModel = CreateSessionViewModel(gateway, TestRepoCatalog(), initialRepos = listOf("owner/repo"))
+
+        viewModel.create("do it", "vibe") {}
+
+        assertNull(gateway.lastRequest?.modelId)
+    }
+
+    @Test
+    fun `the catalogue arrives from the gateway after the screen opens`() = runTest {
+        val viewModel = CreateSessionViewModel(TestGateway(), TestRepoCatalog())
+        assertTrue(viewModel.state.value.models.isEmpty())
+
+        viewModel.onCatalogChanged(listOf(OPUS, LUNA))
+
+        assertEquals(listOf("claude-opus-5", "gpt-5.6-luna"), viewModel.state.value.models.map { it.id })
+    }
+
+    /**
+     * Kiro withdraws models. Sending an id that is no longer offered would be
+     * refused at create time for a choice the user had no way of seeing was
+     * stale, so a vanished selection falls back to no preference.
+     */
+    @Test
+    fun `a selection the new catalogue no longer offers is dropped`() = runTest {
+        val viewModel = CreateSessionViewModel(TestGateway(), TestRepoCatalog())
+        viewModel.onCatalogChanged(listOf(OPUS, LUNA))
+        viewModel.setModel("gpt-5.6-luna")
+
+        viewModel.onCatalogChanged(listOf(OPUS))
+
+        assertNull(viewModel.state.value.modelId)
+        assertEquals(listOf("claude-opus-5"), viewModel.state.value.models.map { it.id })
+    }
+
+    /** A selection survives a catalogue that still offers it. */
+    @Test
+    fun `a selection the new catalogue still offers is kept`() = runTest {
+        val viewModel = CreateSessionViewModel(TestGateway(), TestRepoCatalog())
+        viewModel.onCatalogChanged(listOf(OPUS, LUNA))
+        viewModel.setModel("claude-opus-5")
+
+        viewModel.onCatalogChanged(listOf(OPUS))
+
+        assertEquals("claude-opus-5", viewModel.state.value.modelId)
+    }
+
+    /**
+     * What the user saw was the operating system's own words for a socket that
+     * had died some time earlier: "Could not start the session: failed to send:
+     * Software caused connection abort". The app reconnects on its own now, so
+     * the only useful thing to say is to wait and press it again.
+     */
+    @Test
+    fun `a dropped connection is named as one rather than quoted from the OS`() = runTest {
+        val gateway = TestGateway(
+            onCreate = {
+                throw TransportClosedException("failed to send: Software caused connection abort")
+            },
+        )
+        val viewModel = CreateSessionViewModel(gateway, TestRepoCatalog(), initialRepos = listOf("owner/repo"))
+
+        viewModel.create("do it", null) {}
+
+        val error = assertNotNull(viewModel.state.value.error)
+        assertTrue(error.startsWith("Lost the connection to the bridge."), error)
+        assertTrue("Software caused connection abort" !in error, error)
+        assertEquals(false, viewModel.state.value.busy)
+    }
+
+    private companion object {
+        val OPUS = KiroModel("claude-opus-5", "Opus 5", null, rateMultiplier = 2.2, rateUnit = "Credit")
+        val LUNA = KiroModel("gpt-5.6-luna", "Luna", null)
     }
 }

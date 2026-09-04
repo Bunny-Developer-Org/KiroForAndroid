@@ -79,13 +79,25 @@ private const val MAX_RECENT = 8
 
 /** [RepoCatalog] over a live [CloudSessionGateway] plus a persisted [RecentRepoStore]. */
 public class GatewayRepoCatalog(
-    private val gateway: CloudSessionGateway,
+    /**
+     * Resolved per call, so a reconnect — which replaces the gateway instance —
+     * does not leave this catalog talking to a socket that is already gone.
+     */
+    private val gateway: () -> CloudSessionGateway,
     private val store: RecentRepoStore,
     private val logger: Logger,
     private val now: () -> Long = System::currentTimeMillis,
 ) : RepoCatalog {
 
-    override suspend fun providers(): List<SourceProvider> = gateway.listSourceProviders()
+    /** Convenience for callers holding one long-lived gateway, tests included. */
+    public constructor(
+        gateway: CloudSessionGateway,
+        store: RecentRepoStore,
+        logger: Logger,
+        now: () -> Long = System::currentTimeMillis,
+    ) : this({ gateway }, store, logger, now)
+
+    override suspend fun providers(): List<SourceProvider> = gateway().listSourceProviders()
 
     /**
      * Exceptions are deliberately **not** caught here — the ViewModel is what
@@ -93,10 +105,10 @@ public class GatewayRepoCatalog(
      * the "silently invisible" bug this type exists to fix.
      */
     override suspend fun catalog(): List<RepoSuggestion> {
-        val connected = gateway.listSourceProviders()
+        val connected = gateway().listSourceProviders()
             .filter { it.connectionStatus == SourceProvider.ConnectionStatus.CONNECTED }
         return connected
-            .flatMap { provider -> gateway.listRepositories(provider.providerType) }
+            .flatMap { provider -> gateway().listRepositories(provider.providerType) }
             .map { repo ->
                 RepoSuggestion(
                     slug = repo.name,
@@ -155,7 +167,7 @@ public class GatewayRepoCatalog(
                 else -> b.compareTo(a)
             }
         }
-        val sessions = gateway.listSessions(source = SessionSource.REMOTE)
+        val sessions = gateway().listSessions(source = SessionSource.REMOTE)
             .sortedWith(compareBy(byRecency) { it.updatedAt })
         val seenSlugs = LinkedHashSet<String>()
         val result = mutableListOf<RecentRepo>()
