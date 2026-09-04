@@ -31,6 +31,9 @@ class AcpClientTest {
         var connectCalls = 0
         var failConnect = false
 
+        /** Stands in for a socket the OS has aborted underneath us. */
+        var failSend: Throwable? = null
+
         /**
          * When set, [connect] suspends on this until it is completed — the
          * controllable stand-in for a real handshake taking time. Left null
@@ -50,6 +53,7 @@ class AcpClientTest {
         override suspend fun send(message: RpcMessage) {
             if (!connected) throw TransportClosedException("connect() has not run")
             if (closed) throw TransportClosedException("closed")
+            failSend?.let { throw it }
             sent += message
         }
 
@@ -298,5 +302,55 @@ class AcpClientTest {
         assertEquals(2, transport.connectCalls)
 
         client.close()
+    }
+
+    /**
+     * The regression tests for the drop that nothing noticed.
+     *
+     * A dead socket used to end at the pump's `catch`: one log line, then silence.
+     * `BridgeGateway` went on publishing `Connected`, `MainActivity`'s reconnect
+     * loop stayed parked inside a `collect` that would never emit again, and the
+     * user's first news of it was the operating system's own words on the next
+     * send -- "failed to send: Software caused connection abort" -- for a
+     * connection the whole app still believed in. [AcpClient.live] is the signal
+     * that was missing; these pin both routes to it.
+     */
+    @Test
+    fun `live goes false when the transport stops delivering`() = runTest {
+        val transport = FakeTransport()
+        val client = AcpClient(transport, this)
+        client.start()
+        assertTrue(client.live.value)
+
+        // What a dropped socket looks like from here: the inbound stream ends.
+        transport.inbound.close()
+        runCurrent()
+
+        assertTrue(!client.live.value)
+        client.close()
+    }
+
+    @Test
+    fun `live goes false when a send fails`() = runTest {
+        val transport = FakeTransport()
+        val client = AcpClient(transport, this)
+        client.start()
+
+        // The half-open case, and the one the user actually hit: the read side has
+        // nothing to report, and the write is the first thing to find out.
+        transport.failSend = TransportClosedException("failed to send: Software caused connection abort")
+
+        val call = async { assertFailsWith<TransportClosedException> { client.request("session/new") } }
+        runCurrent()
+        call.await()
+
+        assertTrue(!client.live.value)
+        client.close()
+    }
+
+    @Test
+    fun `live is false before start`() = runTest {
+        val client = AcpClient(FakeTransport(), this)
+        assertTrue(!client.live.value)
     }
 }

@@ -44,7 +44,7 @@ public data class BridgeConfig(
     /**
      * The Cloudflare Zero Trust team domain, e.g. `acme.cloudflareaccess.com`.
      *
-     * Set together with [accessAudience], this turns on `GET /qr` (F-29) and nothing
+     * Set together with [accessAudience], this turns on `GET /qr` (F-30) and nothing
      * else. Not a secret -- it appears in every Access URL -- so a flag is fine.
      */
     val accessTeamDomain: String? = null,

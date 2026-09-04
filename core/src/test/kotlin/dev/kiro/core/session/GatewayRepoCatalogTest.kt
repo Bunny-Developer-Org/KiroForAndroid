@@ -93,6 +93,22 @@ class GatewayRepoCatalogTest {
     }
 
     @Test
+    fun `sessions with a null updatedAt sort last regardless of position`() = runBlocking {
+        // A naive `compareByDescending(nullsLast())` would put a null updatedAt
+        // *first* here, since descending reverses nulls-last too. "unknown last"
+        // must hold either way the comparator is walked.
+        val sessions = mutableListOf(
+            session("s1", listOf(SourceRepo("GITHUB", "unknown/repo", null)), null),
+            session("s2", listOf(SourceRepo("GITHUB", "known/repo", null)), "2026-09-01T10:00:00.000Z"),
+        )
+        val catalog = GatewayRepoCatalog(FakeGateway(sessions), InMemoryRecentRepoStore(), Logger.None)
+
+        val recents = catalog.recent()
+
+        assertEquals(listOf("known/repo", "unknown/repo"), recents.map { it.slug })
+    }
+
+    @Test
     fun `a listSessions failure falls back to the persisted store alone`() = runBlocking {
         val store = InMemoryRecentRepoStore(listOf(RecentRepo("persisted/repo", "GITHUB", 1L)))
         val catalog = GatewayRepoCatalog(ThrowingListSessionsGateway(), store, Logger.None)

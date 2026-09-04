@@ -2,7 +2,9 @@ package dev.kiro.android.ui.create
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.kiro.core.acp.TransportClosedException
 import dev.kiro.core.model.CloudSession
+import dev.kiro.core.model.KiroModel
 import dev.kiro.core.model.SourceProvider
 import dev.kiro.core.session.CloudSessionGateway
 import dev.kiro.core.session.CreateSessionRequest
@@ -28,10 +30,27 @@ import kotlinx.coroutines.launch
  * `CreateScreenHost.onCreate` handler, including its exception mapping.
  */
 class CreateSessionViewModel(
-    private val gateway: CloudSessionGateway,
+    /**
+     * Resolved per call, not captured once.
+     *
+     * A dropped socket is replaced by a *new* gateway instance, and a screen
+     * holding the old one would keep failing against a connection that no longer
+     * exists — which is what made "Could not start the session: failed to send"
+     * survive the reconnect that had already fixed it. Asking for the gateway at
+     * the moment of use is what lets a half-filled form outlive a reconnect
+     * instead of being thrown away with the connection.
+     */
+    private val gateway: () -> CloudSessionGateway,
     private val catalog: RepoCatalog,
     initialRepos: List<String> = emptyList(),
 ) : ViewModel() {
+
+    /** Convenience for callers holding one long-lived gateway, tests included. */
+    constructor(
+        gateway: CloudSessionGateway,
+        catalog: RepoCatalog,
+        initialRepos: List<String> = emptyList(),
+    ) : this({ gateway }, catalog, initialRepos)
 
     data class State(
         val providers: List<SourceProvider> = emptyList(),
@@ -41,6 +60,15 @@ class CreateSessionViewModel(
         val query: String = "",
         val manualEntry: String = "",
         val manualError: String? = null,
+        /**
+         * The last model list the agent published, which is all a create screen
+         * can ever have: models are only listed against a session, so before one
+         * exists this is a remembered list or nothing at all (PROTOCOL-FINDINGS
+         * §4d, [dev.kiro.core.session.ModelCatalogStore]).
+         */
+        val models: List<KiroModel> = emptyList(),
+        /** Null means "whatever the session comes up with" — not a hidden default. */
+        val modelId: String? = null,
         val busy: Boolean = false,
         val error: String? = null,
     ) {
@@ -88,6 +116,18 @@ class CreateSessionViewModel(
     }
 
     /**
+     * Folds in a catalogue the gateway has published.
+     *
+     * Fed from the host rather than collected here, because the flow to collect
+     * belongs to a gateway instance and a reconnect produces a new one — a
+     * collector started in `init` would go on listening to the dead connection's
+     * flow for the rest of this screen's life.
+     */
+    fun onCatalogChanged(models: List<KiroModel>) {
+        _state.update { current -> current.withCatalog(models) }
+    }
+
+    /**
      * A manually-entered selection is upgraded to a catalog-origin one once the
      * catalog arrives and its slug matches, so the pill can show
      * [RepoSuggestion.defaultBranch] instead of staying a bare typed string.
@@ -101,6 +141,24 @@ class CreateSessionViewModel(
         return selected.map { repo ->
             if (repo.origin == RepoSuggestion.Origin.MANUAL) bySlug[repo.slug] ?: repo else repo
         }
+    }
+
+    /**
+     * Folds a new catalogue in, dropping a selection the new list no longer offers.
+     *
+     * Kiro withdraws models, and silently sending an id that is no longer on offer
+     * would produce a refusal at create time for a choice the user could not see
+     * was stale. Falling back to "no preference" starts the session on whatever
+     * the agent defaults to, which is the outcome they had before they picked.
+     */
+    private fun State.withCatalog(models: List<KiroModel>): State = copy(
+        models = models,
+        modelId = modelId?.takeIf { chosen -> models.isEmpty() || models.any { it.id == chosen } },
+    )
+
+    /** Passing null is "no preference", which is a real answer and not a reset. */
+    fun setModel(modelId: String?) {
+        _state.update { it.copy(modelId = modelId) }
     }
 
     fun setQuery(query: String) {
@@ -168,11 +226,18 @@ class CreateSessionViewModel(
 
     fun create(prompt: String, modeId: String?, onCreated: (CloudSession) -> Unit) {
         val repos = _state.value.selected
+        val modelId = _state.value.modelId
         if (repos.isEmpty()) return
         _state.update { it.copy(busy = true, error = null) }
         viewModelScope.launch {
+            // One resolution for the whole round trip: creating on one gateway and
+            // prompting on another would send the first message into a connection
+            // that never saw the session.
+            val gateway = gateway()
             runCatching {
-                gateway.createSession(CreateSessionRequest(repos.map { it.slug }, prompt, modeId))
+                gateway.createSession(
+                    CreateSessionRequest(repos.map { it.slug }, prompt, modeId, modelId),
+                )
             }.onSuccess { created ->
                 gateway.prompt(created.id, listOf(PromptBlock.Text(prompt)))
                 catalog.noteUsed(repos.map { it.slug }, repos.associate { it.slug to it.providerType })
@@ -185,6 +250,15 @@ class CreateSessionViewModel(
                         error = when (failure) {
                             is NotEntitledException -> failure.message
                             is SessionLimitReachedException -> failure.message
+                            // What the user actually saw here was the operating
+                            // system's own words -- "failed to send: Software
+                            // caused connection abort" -- for a socket that had
+                            // quietly died some time earlier. The app reconnects on
+                            // its own now, so the only useful instruction is to
+                            // wait a moment and press it again.
+                            is TransportClosedException ->
+                                "Lost the connection to the bridge. It reconnects on its own — " +
+                                    "give it a moment and try again."
                             else -> "Could not start the session: ${failure.message}"
                         },
                     )

@@ -73,7 +73,7 @@ public class PairingService(
      *
      * **One code per surface, and a superseded code dies within 30 seconds.** The
      * older rule was "exactly one pending code, and issuing retires the previous one
-     * instantly". F-29's `/qr` page broke both halves of it, for two different
+     * instantly". F-30's `/qr` page broke both halves of it, for two different
      * reasons.
      *
      * It rotates the code every 30s so a QR someone photographed, or saw in a screen

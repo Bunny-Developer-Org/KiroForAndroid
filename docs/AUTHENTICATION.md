@@ -214,7 +214,7 @@ The bridge is a WebSocket that can drive an agent with write access to the user'
 
 Design:
 
-1. Bridge generates a **pairing code** and shows it one of three ways. Its own console at startup, as a QR and as text (`pairingBanner()`, F-07, 2026-09-04 — the text is printed whether or not the QR can be drawn). `kiro-bridge pair`, which mints one from an already-running bridge over a `0600` Unix socket in the state directory. Or `GET /qr` (F-29), a web page behind Cloudflare Access, so a phone can be paired with no terminal at all.
+1. Bridge generates a **pairing code** and shows it one of three ways. Its own console at startup, as a QR and as text (`pairingBanner()`, F-07, 2026-09-04 — the text is printed whether or not the QR can be drawn). `kiro-bridge pair`, which mints one from an already-running bridge over a `0600` Unix socket in the state directory. Or `GET /qr` (F-30), a web page behind Cloudflare Access, so a phone can be paired with no terminal at all.
 2. App scans the QR or accepts a manual entry — both shipped (manual 2026-09-02, scanning 2026-09-04) — and exchanges the pairing code **once** for a long-lived device token. Scanning uses the Play Services code scanner, which needs no `CAMERA` permission; on a device without Play Services the app hides the scan affordance and manual entry is unaffected.
 3. Device token is stored using AndroidKeyStore + DataStore (**not** `androidx.security:security-crypto`, which is deprecated — see [ADR-003](adr/ADR-003-tech-stack.md#1-stack)).
 4. Every WebSocket connection authenticates with the device token; the bridge maintains a revocable device list.

@@ -11,6 +11,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -160,14 +161,27 @@ private fun CreateScreenHost(
     prefillRepos: List<String>,
     onCreated: (CloudSession) -> Unit,
 ) {
-    val viewModel = remember(gateway, prefillRepos) {
+    // Deliberately *not* keyed on the gateway, unlike every other host here. A
+    // reconnect swaps in a new gateway instance, and re-keying would throw away a
+    // half-filled form -- the repositories picked, the mode, the model -- at the
+    // exact moment the app had just repaired itself. `rememberUpdatedState` is
+    // what lets the view model reach the current gateway without being rebuilt
+    // around it.
+    val currentGateway by rememberUpdatedState(gateway)
+    val viewModel = remember(prefillRepos) {
         CreateSessionViewModel(
-            gateway,
-            GatewayRepoCatalog(gateway, ServiceLocator.recentRepos, ServiceLocator.logger),
+            { currentGateway },
+            GatewayRepoCatalog({ currentGateway }, ServiceLocator.recentRepos, ServiceLocator.logger),
             prefillRepos,
         )
     }
     val state by viewModel.state.collectAsState()
+
+    // Re-launched on a gateway swap, which is the point: the flow belongs to one
+    // gateway instance, and after a reconnect the models arrive on the new one.
+    LaunchedEffect(gateway) {
+        gateway.models.collect { viewModel.onCatalogChanged(it.lastKnownCatalog) }
+    }
 
     CreateSessionScreen(
         state = state,
@@ -183,6 +197,7 @@ private fun CreateScreenHost(
         onToggle = viewModel::toggle,
         onRemove = viewModel::remove,
         onRetryCatalog = viewModel::retryCatalog,
+        onSetModel = viewModel::setModel,
         onCreate = { prompt, modeId -> viewModel.create(prompt, modeId, onCreated) },
     )
 }

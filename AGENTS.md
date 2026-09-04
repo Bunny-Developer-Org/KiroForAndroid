@@ -8,7 +8,7 @@ Written for an agent that has just been dropped into this repo and needs to be u
 
 An unofficial **Android client for [Kiro](https://kiro.dev) cloud sessions** — agent runs that live in a managed cloud sandbox and keep running after the client disconnects. Kiro publishes no third-party API, so the app cannot reach Kiro directly. Instead it talks to a **bridge**: a small Kotlin/JVM process you run yourself on a host where `kiro-cli` is installed and signed in; the bridge supervises `kiro-cli acp` and relays it to the phone over an authenticated WebSocket. That constraint is the origin of nearly every structural decision here and is argued in [ADR-001](docs/adr/ADR-001-cloud-session-access.md).
 
-Status, per [`README.md`](README.md) and [`docs/FEATURES.md`](docs/FEATURES.md): 9 of 31 backlog items done, 4 partial. **The caveat the README puts in bold and you should carry with you: nothing has been exercised against a real, paid cloud-session creation yet.** Work verified so far ran against `FakeGateway` or a local `kiro-cli`.
+Status, per [`README.md`](README.md) and [`docs/FEATURES.md`](docs/FEATURES.md): 11 of 32 backlog items done, 5 partial. **The caveat the README puts in bold and you should carry with you: nothing has been exercised against a real, paid cloud-session creation yet.** Work verified so far ran against `FakeGateway` or a local `kiro-cli`.
 
 ---
 
@@ -48,7 +48,7 @@ Note: [ADR-003 §2](docs/adr/ADR-003-tech-stack.md#2-module-layout) lists a few 
 
 ### `bridge/` — `dev.kiro.bridge`
 
-[`Main.kt`](bridge/src/main/kotlin/dev/kiro/bridge/Main.kt) (CLI parsing, the `pair` subcommand, `USAGE` text), [`BridgeConfig.kt`](bridge/src/main/kotlin/dev/kiro/bridge/BridgeConfig.kt) (defaults `127.0.0.1:8765`; `validate()` refuses a non-loopback bind without TLS, and a plaintext `--public-url`; `advertisedUrl()` decides what a phone is told), [`BridgeServer.kt`](bridge/src/main/kotlin/dev/kiro/bridge/BridgeServer.kt) (Ktor CIO + WebSockets), [`CliSupervisor.kt`](bridge/src/main/kotlin/dev/kiro/bridge/CliSupervisor.kt), [`PairingService.kt`](bridge/src/main/kotlin/dev/kiro/bridge/PairingService.kt) (**one pending code per surface, superseded ones die after 30s** — read its `issueCode` KDoc before changing rotation), [`PairingBanner.kt`](bridge/src/main/kotlin/dev/kiro/bridge/PairingBanner.kt) + [`TerminalQr.kt`](bridge/src/main/kotlin/dev/kiro/bridge/TerminalQr.kt) (the QR half of F-07), [`AccessVerifier.kt`](bridge/src/main/kotlin/dev/kiro/bridge/AccessVerifier.kt) + [`QrRoutes.kt`](bridge/src/main/kotlin/dev/kiro/bridge/QrRoutes.kt) + [`PairingPage.kt`](bridge/src/main/kotlin/dev/kiro/bridge/PairingPage.kt) + [`QrSvg.kt`](bridge/src/main/kotlin/dev/kiro/bridge/QrSvg.kt) + [`QrPageBudget.kt`](bridge/src/main/kotlin/dev/kiro/bridge/QrPageBudget.kt) (F-29's `/qr` page), [`ControlSocket.kt`](bridge/src/main/kotlin/dev/kiro/bridge/ControlSocket.kt) (**read its KDoc before touching it** — it is a Unix socket rather than an HTTP route because a tunnel makes every request look like loopback), [`SessionLog.kt`](bridge/src/main/kotlin/dev/kiro/bridge/SessionLog.kt). Plus [`bridge/Dockerfile`](bridge/Dockerfile).
+[`Main.kt`](bridge/src/main/kotlin/dev/kiro/bridge/Main.kt) (CLI parsing, the `pair` subcommand, `USAGE` text), [`BridgeConfig.kt`](bridge/src/main/kotlin/dev/kiro/bridge/BridgeConfig.kt) (defaults `127.0.0.1:8765`; `validate()` refuses a non-loopback bind without TLS, and a plaintext `--public-url`; `advertisedUrl()` decides what a phone is told), [`BridgeServer.kt`](bridge/src/main/kotlin/dev/kiro/bridge/BridgeServer.kt) (Ktor CIO + WebSockets), [`CliSupervisor.kt`](bridge/src/main/kotlin/dev/kiro/bridge/CliSupervisor.kt), [`PairingService.kt`](bridge/src/main/kotlin/dev/kiro/bridge/PairingService.kt) (**one pending code per surface, superseded ones die after 30s** — read its `issueCode` KDoc before changing rotation), [`PairingBanner.kt`](bridge/src/main/kotlin/dev/kiro/bridge/PairingBanner.kt) + [`TerminalQr.kt`](bridge/src/main/kotlin/dev/kiro/bridge/TerminalQr.kt) (the QR half of F-07), [`AccessVerifier.kt`](bridge/src/main/kotlin/dev/kiro/bridge/AccessVerifier.kt) + [`QrRoutes.kt`](bridge/src/main/kotlin/dev/kiro/bridge/QrRoutes.kt) + [`PairingPage.kt`](bridge/src/main/kotlin/dev/kiro/bridge/PairingPage.kt) + [`QrSvg.kt`](bridge/src/main/kotlin/dev/kiro/bridge/QrSvg.kt) + [`QrPageBudget.kt`](bridge/src/main/kotlin/dev/kiro/bridge/QrPageBudget.kt) (F-30's `/qr` page), [`ControlSocket.kt`](bridge/src/main/kotlin/dev/kiro/bridge/ControlSocket.kt) (**read its KDoc before touching it** — it is a Unix socket rather than an HTTP route because a tunnel makes every request look like loopback), [`SessionLog.kt`](bridge/src/main/kotlin/dev/kiro/bridge/SessionLog.kt). Plus [`bridge/Dockerfile`](bridge/Dockerfile).
 
 ### `tools/`
 
@@ -75,13 +75,13 @@ Commands, in the order CI runs them:
 ```bash
 ./gradlew :core:corePurityCheck      # the one hard rule, checked first (§5)
 ./gradlew detekt                     # static analysis + ktlint formatting rules, maxIssues: 0
-./gradlew :core:test :bridge:test    # JVM unit tests
+./gradlew :core:test :bridge:test :app:testDebugUnitTest   # JVM + Robolectric-free unit tests
 ./gradlew :app:assembleDebug :bridge:installDist
 ```
 
 **Verified here:** `./gradlew projects --offline` and `./gradlew :core:corePurityCheck :core:test :bridge:test --offline` both succeed on this machine (Temurin 21.0.6, ~2 s warm, all tasks `UP-TO-DATE`). Gradle prints a Gradle-10 deprecation warning; harmless today.
 
-`app/` has unit tests too ([8 files under `app/src/test/`](app/src/test/kotlin/dev/kiro/android/)) but **CI does not run them** — `ci.yml` only runs `:core:test :bridge:test`. Run `./gradlew :app:testDebugUnitTest` yourself when you change `app/`.
+`app/` has unit tests too ([under `app/src/test/`](app/src/test/kotlin/dev/kiro/android/)) and, as of the `unit-tests-github-actions` change, **CI runs them**: `ci.yml`'s "Unit tests" step runs `:core:test :bridge:test :app:testDebugUnitTest`. Run `./gradlew :app:testDebugUnitTest` locally when you change `app/`.
 
 **Android SDK:** `:app:assembleDebug` needs one. `:bridge:installDist` does **not** — [`bridge/Dockerfile`](bridge/Dockerfile) states this was verified locally with `ANDROID_HOME` unset, and [`docs/HOSTING.md`](docs/HOSTING.md) repeats it. *I did not re-verify this myself* (this machine has a valid `local.properties` pointing at an SDK, so the test would have been meaningless without perturbing the working tree). Note the accompanying caveat, which is real: configure-on-demand is off, so Gradle still *configures* `:app`; only configuration, not the SDK, is required.
 
@@ -118,7 +118,7 @@ Read [ADR-001](docs/adr/ADR-001-cloud-session-access.md) and [PROTOCOL-FINDINGS]
 | [`docs/HOSTING.md`](docs/HOSTING.md) | The concrete "how" for ADR-005 Option B: a fully cloud-hosted bridge on GCE + Cloudflare Tunnel, with a cost table (~$3/month, not $0) and an explicit verified/unverified section. |
 | [`docs/VISUAL-LANGUAGE.md`](docs/VISUAL-LANGUAGE.md) | Not an ADR. Constrains look, so parallel screen work produces one app. Gives numbers; use them. |
 | [`docs/PRIOR-ART.md`](docs/PRIOR-ART.md) | Other unofficial Kiro clients, surveyed 2026-09-02. None reaches cloud sessions. |
-| [`docs/FEATURES.md`](docs/FEATURES.md) | The backlog (`F-00`…`F-29`, 31 headings — `F-19` also has an `F-19b`) with per-item status — the freshest source of truth for what is done. **Its "How to pick up an item" section is effectively this repo's contribution guide.** |
+| [`docs/FEATURES.md`](docs/FEATURES.md) | The backlog (`F-00`…`F-30`, 32 headings — `F-19` also has an `F-19b`, and `F-24`–`F-30` sit out of numeric order) with per-item status — the freshest source of truth for what is done. **Its "How to pick up an item" section is effectively this repo's contribution guide.** |
 
 ---
 
@@ -147,6 +147,26 @@ Taken verbatim in substance from [`docs/FEATURES.md` § How to pick up an item](
 4. Use the paths in ADR-003 §2. If you need a new package, say so.
 5. Done = acceptance criteria met · unit tests for `core/` logic · no new lint/detekt warnings · docs updated if a decision changed · tolerant parsing preserved.
 6. **If an assumption proves false, stop and report it** — update the ADR, don't work around it locally.
+
+---
+
+<!-- skill-issue:sentinel:start -->
+## Sentinel quality gate
+
+For every bug fix, feature improvement, behavior-changing refactor, schema/API
+change, or deployment/CI/runtime configuration change:
+
+1. Record the starting Git boundary before implementation.
+2. Complete focused implementation and tests.
+3. Run `.agents/skills/sentinel/SKILL.md` against the exact task change set.
+4. Apply P1 and in-scope P2 findings, rerun affected checks, and run Sentinel
+   again.
+5. Do not declare completion without the Sentinel attestation.
+
+Use `.agents/skills/sentinel/CHECKLIST.md` for this repository's architecture,
+quality, security, and deployment contracts. Sentinel reports are local
+evidence under `.sentinel/reviews/` and are excluded from Git.
+<!-- skill-issue:sentinel:end -->
 
 ---
 
