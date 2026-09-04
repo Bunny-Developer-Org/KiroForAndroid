@@ -94,20 +94,29 @@ fun ModelBar(
         ) {
             Text("model", style = MaterialTheme.typography.labelMedium, color = colors.muted)
 
-            Text(
-                text = currentModelLabel(selection),
-                modifier = Modifier.weight(1f, fill = false),
-                style = MaterialTheme.typography.labelLarge,
-                // Muted, not full strength, while unknown: the row must read as a
-                // fact not yet in hand rather than as the name of a model.
-                color = if (selection.isKnown) colors.textStrong else colors.muted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            // One weighted group holding the name and its rate, so the trailing
+            // action below lands flush right. It used to be a weighted Text plus a
+            // weighted spacer, which *splits* the slack: a short model name gave
+            // back half of it and nothing reclaimed it, leaving "change" adrift in
+            // the middle of the row instead of at its edge.
+            Row(
+                Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = currentModelLabel(selection),
+                    modifier = Modifier.weight(1f, fill = false),
+                    style = MaterialTheme.typography.labelLarge,
+                    // Muted, not full strength, while unknown: the row must read as
+                    // a fact not yet in hand rather than as the name of a model.
+                    color = if (selection.isKnown) colors.textStrong else colors.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
 
-            RateBadge(selection.current)
-
-            Box(Modifier.weight(1f))
+                RateBadge(selection.current)
+            }
 
             Text(
                 text = if (change is ModelChange.InFlight) "switching…" else "change",

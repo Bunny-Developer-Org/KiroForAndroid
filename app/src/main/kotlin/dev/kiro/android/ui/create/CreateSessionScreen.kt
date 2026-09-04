@@ -274,19 +274,29 @@ private fun ClosedModelRow(chosen: KiroModel?, open: Boolean, onClick: () -> Uni
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
-            chosen?.name ?: "Kiro's default",
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.text,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
-        )
-        // The rate travels with the name even while closed: at 0.05x to 2.2x the
-        // model is the price, and a picker that hides the figure once chosen
-        // hides it exactly when it has been committed to.
-        RateBadge(chosen)
-        Box(Modifier.weight(1f))
+        // The name and its rate are one weighted group, and the chevron is not in
+        // it. Two `weight(1f)` siblings would *split* the slack between them —
+        // which is what left the chevron stranded mid-row rather than at the edge,
+        // since a short name gives back its half and nothing reclaims it. One
+        // filling child, then the trailing icon, is what pins the icon right.
+        Row(
+            Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                chosen?.name ?: "Kiro's default",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.text,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            // The rate travels with the name even while closed: at 0.05x to 2.2x
+            // the model is the price, and a picker that hides the figure once
+            // chosen hides it exactly when it has been committed to.
+            RateBadge(chosen)
+        }
         Icon(
             imageVector = if (open) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
             contentDescription = if (open) "Hide the model list" else "Show the model list",
