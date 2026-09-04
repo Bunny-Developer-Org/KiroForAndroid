@@ -81,7 +81,92 @@ secret is `KIRO_API_KEY` — the "paste one key" provisioning path
 | Kiro account | `--api-key` | `KIRO_API_KEY` | none — falls back to an interactive `kiro-cli login` on the host |
 | `kiro-cli` location | `--kiro-cli` | `KIRO_CLI_PATH` | `kiro-cli` on `PATH` |
 | TLS cert / key | `--tls-cert` / `--tls-key` | *(flags only, no env var)* | none |
-| Paired-device state | `--state-dir` | *(flag only, no env var)* | `~/.kiro-bridge` |
+| Paired-device state | `--state-dir` | *(flag only, no env var)* | `~/.kiro-bridge` — also holds the `bridge pair` control socket |
+| Address to advertise | `--public-url` | `KIRO_BRIDGE_PUBLIC_URL` | none — falls back to the bind address, **which is wrong behind a tunnel** (see below) |
+| Pairing QR | `--no-qr` | `KIRO_BRIDGE_NO_QR` | QR printed; the address and code are printed as text either way |
+| Zero Trust team | `--access-team-domain` | `KIRO_BRIDGE_ACCESS_TEAM_DOMAIN` | none — with the next row, turns on `GET /qr` |
+| Access application | `--access-aud` | `KIRO_BRIDGE_ACCESS_AUD` | none. Both or neither; half-configured refuses to start |
+
+**`--public-url` is the one setting a tunnelled deployment cannot skip.** The
+bridge binds `127.0.0.1` and `cloudflared` connects to it like any other local
+client, so nothing in the process knows the public hostname. Without it, the QR
+in the pairing banner carries `ws://127.0.0.1:8765/acp` — an address that, on a
+phone, means the phone. The banner says so when it is unset, and
+`setup-tunnel.sh` prints the line to add once the hostname exists.
+
+### Pairing without SSH at all: the `/qr` page
+
+`kiro-bridge pair` still needs a terminal on the bridge host. `GET /qr` does not:
+it serves the same QR as a web page, behind Cloudflare Access, so adding a phone
+is open a URL → sign in with Google → scan.
+
+It is **opt-in and off by default**, and turning it on takes two values from your
+Zero Trust dashboard — the team domain (Settings → General) and the application's
+Application Audience (AUD) tag (Access → Applications → your app → Overview):
+
+```bash
+KIRO_BRIDGE_ACCESS_TEAM_DOMAIN=your-team.cloudflareaccess.com
+KIRO_BRIDGE_ACCESS_AUD=<the AUD tag>
+```
+
+**Scope the Access application to the `/qr` path, not to the hostname.** The phone
+cannot complete a browser sign-in, so an application covering the whole hostname
+breaks `POST /pair` and the `/acp` WebSocket: the app stops pairing *and* stops
+connecting, and its error will not point at Cloudflare. There is a test
+(`QrPageTest`) that pins `/pair` and `/acp` as reachable with no Access session.
+
+The bridge verifies the `Cf-Access-Jwt-Assertion` itself — RS256 against your
+team's published signing keys, plus `alg`, `exp`, `nbf`, `iss` and `aud` — rather
+than trusting the header, because its origin port is reachable without going
+through the tunnel. Unconfigured, half-configured or unverifiable, `/qr` answers
+403 and says which. The code on the page rotates every 30 seconds, and the page
+stops minting after ten minutes so a forgotten tab is not a code generator.
+
+Limitations worth knowing before you commit to it:
+
+- It needs a Cloudflare Zero Trust account. Free up to 50 users, but it is a
+  second Cloudflare product to configure beyond Tunnel.
+- The bridge must be able to reach `https://<team>/cdn-cgi/access/certs`. If it
+  cannot, `/qr` fails closed — `kiro-bridge pair` and the startup banner are
+  unaffected. A cache that has gone stale is served for up to 24 hours rather
+  than dropping the page during a transient Cloudflare blip.
+- A short Access session lifetime can bounce you to a login mid-refresh.
+
+**Unverified (2026-09-04):** the bridge side is tested end to end against a local
+JWKS, but no Access application has been created against a real Zero Trust
+account, and nobody has scanned one of these pages with a phone.
+
+### Pairing a phone to a bridge that is already running
+
+A pairing code is only valid inside the process that will redeem it, so minting
+one used to mean restarting the bridge and dropping every attached client.
+Instead:
+
+```bash
+sudo runuser -u bridge -- /opt/kiro-bridge/bin/bridge pair \
+  --state-dir /home/bridge/.kiro-bridge
+```
+
+It prints a fresh code and a scannable QR of the advertised address, in *your*
+terminal, and the bridge keeps serving throughout.
+
+Run it as the user the bridge runs as. The control socket lives in that user's
+state directory, so a bare `bridge pair` from your own SSH session looks in your
+home directory and reports — accurately, but confusingly — that no bridge is
+running there. The command says as much when it happens.
+
+It talks to the bridge over a `0600` Unix domain socket rather than an HTTP
+route, and that is a security decision rather than a stylistic one: behind the
+tunnel every HTTP request arrives with `remoteHost == 127.0.0.1`, so an endpoint
+guarded by a "loopback only" check would be reachable by the entire internet.
+[AUTHENTICATION §4](AUTHENTICATION.md#4-auth-1-pairing-the-app-to-the-bridge)
+records that, and a related consequence for rate limiting that is **not** fixed.
+
+**One behaviour change worth knowing about:** a bridge now refuses to start if
+another one is already running against the same `--state-dir`. `PairingService`
+rewrites `devices.txt` wholesale from its own in-memory map, so two bridges
+sharing a state directory silently delete each other's paired devices. Give a
+second bridge its own `--state-dir`.
 
 `BridgeConfig.validate()` is a hard constraint both deployment paths below
 are built around, not something they route past: **it refuses to bind
@@ -454,6 +539,17 @@ this without owning a domain.
   Cloudflare's edge and the bridge logs the connection attempt in the same
   second, with `cloudflared` running as a systemd unit on the VM and nothing
   running on the developer's machine.
+- **QR pairing and `bridge pair` are verified locally, not on a phone
+  (2026-09-04).** Against the real `installDist` binary on a workstation: a code
+  minted over the control socket was exchanged for a real device token while the
+  server stayed up — one process start, no restart — the previous code was
+  retired, a second bridge on the same state directory was refused, and the
+  refusal left the running bridge's socket intact. That last one was a genuine
+  bug the unit tests missed and only running the binary caught. **What has not
+  been verified is a phone camera actually reading one of these QR codes**, or
+  any of it running on the GCE VM with `KIRO_BRIDGE_PUBLIC_URL` set. The QR's
+  polarity and module fidelity are pinned by tests and were checked by rendering
+  one to an image; that is not the same as a scan.
 - **`kiro-cli`'s installer is large.** Its own zip is ~600 MB compressed
   (~1 GB installed across `kiro-cli`, `kiro-cli-chat`, and `kiro-cli-term`),
   found by inspecting the real installer while writing this. That's the

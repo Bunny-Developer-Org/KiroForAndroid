@@ -27,6 +27,9 @@ junit = "4.13.2"
 turbine = "1.2.1"
 slf4j = "2.0.16"
 logback = "1.5.12"
+qrcodegen = "1.8.0"
+playServicesCodeScanner = "16.1.0"
+playServicesBase = "18.10.1"
 
 [libraries]
 detekt-formatting = { module = "io.gitlab.arturbosch.detekt:detekt-formatting", version.ref = "detekt" }
@@ -45,6 +48,10 @@ ktor-server-websockets = { module = "io.ktor:ktor-server-websockets", version.re
 ktor-server-status-pages = { module = "io.ktor:ktor-server-status-pages", version.ref = "ktor" }
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+# QR encoding for the pairing banner (F-07). MIT, ~30 KB, no transitive
+# dependencies -- which is why it beat ZXing, whose core drags a whole barcode
+# toolkit along for the one 2D encoder we need.
+nayuki-qrcodegen = { module = "io.nayuki:qrcodegen", version.ref = "qrcodegen" }
 
 # --- app/ (Android)
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -62,6 +69,15 @@ compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 compose-material3 = { module = "androidx.compose.material3:material3" }
 compose-material-icons-extended = { module = "androidx.compose.material:material-icons-extended" }
+# QR scanning for pairing (F-07). Chosen over CameraX + ML Kit because it needs
+# **no CAMERA permission** -- the scanning UI runs in Play Services' own process,
+# so there is no permission flow and no preview screen to build. The cost is a
+# hard Play Services dependency, which QrScanner feature-detects: without it the
+# scan affordance is hidden and manual entry (shipped 2026-09-02) is unaffected.
+play-services-code-scanner = { module = "com.google.android.gms:play-services-code-scanner", version.ref = "playServicesCodeScanner" }
+# A transitive of code-scanner, named here because the catalog is the single
+# source of truth (ADR-003 §1) and the availability check imports from it.
+play-services-base = { module = "com.google.android.gms:play-services-base", version.ref = "playServicesBase" }
 
 # --- test
 junit = { module = "junit:junit", version.ref = "junit" }

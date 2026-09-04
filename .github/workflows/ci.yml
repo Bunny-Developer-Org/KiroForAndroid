@@ -35,8 +35,10 @@ jobs:
       - name: Static analysis
         run: ./gradlew detekt
 
+      # app/ included since F-07: its pure-JVM tests cover the wording a user sees
+      # when a scan fails, and a suite CI never runs is a suite that rots.
       - name: Unit tests
-        run: ./gradlew :core:test :bridge:test
+        run: ./gradlew :core:test :bridge:test :app:testDebugUnitTest
 
       - name: Assemble
         run: ./gradlew :app:assembleDebug :bridge:installDist

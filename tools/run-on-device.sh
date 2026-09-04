@@ -6,6 +6,11 @@
 # is correct and which `adb reverse` sidesteps entirely: the phone's own
 # 127.0.0.1:8765 is forwarded down the USB cable to this machine's loopback.
 # Nothing is exposed to the LAN and no certificate is needed.
+#
+# It is also the one shape that wants no --public-url: the bridge falls back to
+# advertising its own loopback address, and here that is exactly right, because
+# the phone really does reach it at 127.0.0.1. A tunnelled bridge is the case
+# that needs to be told (docs/HOSTING.md §1).
 set -euo pipefail
 
 PORT="${KIRO_BRIDGE_PORT:-8765}"

@@ -8,7 +8,7 @@ Written for an agent that has just been dropped into this repo and needs to be u
 
 An unofficial **Android client for [Kiro](https://kiro.dev) cloud sessions** — agent runs that live in a managed cloud sandbox and keep running after the client disconnects. Kiro publishes no third-party API, so the app cannot reach Kiro directly. Instead it talks to a **bridge**: a small Kotlin/JVM process you run yourself on a host where `kiro-cli` is installed and signed in; the bridge supervises `kiro-cli acp` and relays it to the phone over an authenticated WebSocket. That constraint is the origin of nearly every structural decision here and is argued in [ADR-001](docs/adr/ADR-001-cloud-session-access.md).
 
-Status, per [`README.md`](README.md) and [`docs/FEATURES.md`](docs/FEATURES.md): 7 of 26 backlog items done, 5 partial. **The caveat the README puts in bold and you should carry with you: nothing has been exercised against a real, paid cloud-session creation yet.** Work verified so far ran against `FakeGateway` or a local `kiro-cli`.
+Status, per [`README.md`](README.md) and [`docs/FEATURES.md`](docs/FEATURES.md): 9 of 31 backlog items done, 4 partial. **The caveat the README puts in bold and you should carry with you: nothing has been exercised against a real, paid cloud-session creation yet.** Work verified so far ran against `FakeGateway` or a local `kiro-cli`.
 
 ---
 
@@ -32,6 +32,7 @@ Three Gradle modules, confirmed by [`settings.gradle.kts`](settings.gradle.kts) 
 - [`session/`](core/src/main/kotlin/dev/kiro/core/session/) — `CloudSessionGateway.kt` is **the seam every feature codes against**; `BridgeGateway.kt` is the live implementation over ACP; `FakeGateway.kt` is the offline stand-in; `TranscriptReducer.kt`; `RepoCatalog.kt`.
 - [`model/`](core/src/main/kotlin/dev/kiro/core/model/) — `CloudSession`, `SourceRepo`, `RepoSlug`, `PermissionRequest`, `TranscriptEntry`, `AgentMode`.
 - [`auth/TokenStore.kt`](core/src/main/kotlin/dev/kiro/core/auth/TokenStore.kt), [`util/Logger.kt`](core/src/main/kotlin/dev/kiro/core/util/Logger.kt) (also declares `Clock` and `DriftMetrics`) — platform interfaces implemented in `app/`.
+- [`auth/PairingPayload.kt`](core/src/main/kotlin/dev/kiro/core/auth/PairingPayload.kt) — the QR pairing payload, in `core/` **because both the bridge and the app speak it** and a format defined twice drifts. Also the only place it can be unit-tested, `app/` having no Robolectric or instrumentation.
 - [`src/test/resources/fixtures/`](core/src/test/resources/fixtures/) — **golden JSONL frames captured from a real `kiro-cli 2.19.2`.** Tests parse these, not invented frames. Its [README](core/src/test/resources/fixtures/README.md) explains the format.
 
 Note: [ADR-003 §2](docs/adr/ADR-003-tech-stack.md#2-module-layout) lists a few files that do not exist yet (`TurnStateMachine.kt`, `auth/DeviceCodeFlow.kt`, `PkceFlow.kt`, `model/AutonomyLevel.kt`, `KiroModel.kt`, `ToolCall.kt`, an `app/ui/settings/` package). The ADR describes the intended layout; the tree above is what is actually on disk today.
@@ -47,7 +48,7 @@ Note: [ADR-003 §2](docs/adr/ADR-003-tech-stack.md#2-module-layout) lists a few 
 
 ### `bridge/` — `dev.kiro.bridge`
 
-[`Main.kt`](bridge/src/main/kotlin/dev/kiro/bridge/Main.kt) (CLI parsing, pairing banner, `USAGE` text), [`BridgeConfig.kt`](bridge/src/main/kotlin/dev/kiro/bridge/BridgeConfig.kt) (defaults `127.0.0.1:8765`; `validate()` refuses a non-loopback bind without TLS), [`BridgeServer.kt`](bridge/src/main/kotlin/dev/kiro/bridge/BridgeServer.kt) (Ktor CIO + WebSockets), [`CliSupervisor.kt`](bridge/src/main/kotlin/dev/kiro/bridge/CliSupervisor.kt), [`PairingService.kt`](bridge/src/main/kotlin/dev/kiro/bridge/PairingService.kt), [`SessionLog.kt`](bridge/src/main/kotlin/dev/kiro/bridge/SessionLog.kt). Plus [`bridge/Dockerfile`](bridge/Dockerfile).
+[`Main.kt`](bridge/src/main/kotlin/dev/kiro/bridge/Main.kt) (CLI parsing, the `pair` subcommand, `USAGE` text), [`BridgeConfig.kt`](bridge/src/main/kotlin/dev/kiro/bridge/BridgeConfig.kt) (defaults `127.0.0.1:8765`; `validate()` refuses a non-loopback bind without TLS, and a plaintext `--public-url`; `advertisedUrl()` decides what a phone is told), [`BridgeServer.kt`](bridge/src/main/kotlin/dev/kiro/bridge/BridgeServer.kt) (Ktor CIO + WebSockets), [`CliSupervisor.kt`](bridge/src/main/kotlin/dev/kiro/bridge/CliSupervisor.kt), [`PairingService.kt`](bridge/src/main/kotlin/dev/kiro/bridge/PairingService.kt) (**one pending code per surface, superseded ones die after 30s** — read its `issueCode` KDoc before changing rotation), [`PairingBanner.kt`](bridge/src/main/kotlin/dev/kiro/bridge/PairingBanner.kt) + [`TerminalQr.kt`](bridge/src/main/kotlin/dev/kiro/bridge/TerminalQr.kt) (the QR half of F-07), [`AccessVerifier.kt`](bridge/src/main/kotlin/dev/kiro/bridge/AccessVerifier.kt) + [`QrRoutes.kt`](bridge/src/main/kotlin/dev/kiro/bridge/QrRoutes.kt) + [`PairingPage.kt`](bridge/src/main/kotlin/dev/kiro/bridge/PairingPage.kt) + [`QrSvg.kt`](bridge/src/main/kotlin/dev/kiro/bridge/QrSvg.kt) + [`QrPageBudget.kt`](bridge/src/main/kotlin/dev/kiro/bridge/QrPageBudget.kt) (F-29's `/qr` page), [`ControlSocket.kt`](bridge/src/main/kotlin/dev/kiro/bridge/ControlSocket.kt) (**read its KDoc before touching it** — it is a Unix socket rather than an HTTP route because a tunnel makes every request look like loopback), [`SessionLog.kt`](bridge/src/main/kotlin/dev/kiro/bridge/SessionLog.kt). Plus [`bridge/Dockerfile`](bridge/Dockerfile).
 
 ### `tools/`
 
@@ -90,7 +91,13 @@ Running the bridge locally:
 ./gradlew :bridge:installDist && ./bridge/build/install/bridge/bin/bridge
 ```
 
-It prints a pairing code. `--help` documents the flags (`--bind`, `--port`, `--api-key`/`KIRO_API_KEY`, `--tls-cert`, `--state-dir`, `--pair`). For a phone over USB use [`tools/run-on-device.sh`](tools/run-on-device.sh); for an emulator, [`tools/run-emulator.sh`](tools/run-emulator.sh) first.
+It prints a pairing code, as a QR and as text. `--help` documents the flags (`--bind`, `--port`, `--public-url`/`KIRO_BRIDGE_PUBLIC_URL`, `--no-qr`, `--api-key`/`KIRO_API_KEY`, `--tls-cert`, `--state-dir`, `--pair`). To add a phone to a bridge that is *already running*, use the subcommand rather than a restart:
+
+```bash
+kiro-bridge pair --state-dir <the running bridge's state dir>
+```
+
+For a phone over USB use [`tools/run-on-device.sh`](tools/run-on-device.sh); for an emulator, [`tools/run-emulator.sh`](tools/run-emulator.sh) first. Both work with `--public-url` unset — `adb reverse` is the one shape where the loopback address the bridge falls back to is the correct thing to advertise.
 
 ---
 
@@ -111,7 +118,7 @@ Read [ADR-001](docs/adr/ADR-001-cloud-session-access.md) and [PROTOCOL-FINDINGS]
 | [`docs/HOSTING.md`](docs/HOSTING.md) | The concrete "how" for ADR-005 Option B: a fully cloud-hosted bridge on GCE + Cloudflare Tunnel, with a cost table (~$3/month, not $0) and an explicit verified/unverified section. |
 | [`docs/VISUAL-LANGUAGE.md`](docs/VISUAL-LANGUAGE.md) | Not an ADR. Constrains look, so parallel screen work produces one app. Gives numbers; use them. |
 | [`docs/PRIOR-ART.md`](docs/PRIOR-ART.md) | Other unofficial Kiro clients, surveyed 2026-09-02. None reaches cloud sessions. |
-| [`docs/FEATURES.md`](docs/FEATURES.md) | The backlog (`F-00`…`F-24`, 26 headings — `F-19` appears twice) with per-item status — the freshest source of truth for what is done. **Its "How to pick up an item" section is effectively this repo's contribution guide.** |
+| [`docs/FEATURES.md`](docs/FEATURES.md) | The backlog (`F-00`…`F-29`, 31 headings — `F-19` also has an `F-19b`) with per-item status — the freshest source of truth for what is done. **Its "How to pick up an item" section is effectively this repo's contribution guide.** |
 
 ---
 
@@ -152,6 +159,8 @@ Taken verbatim in substance from [`docs/FEATURES.md` § How to pick up an item](
 - **The bridge refuses a non-loopback bind without TLS** (`BridgeConfig.validate()`). This is deliberate, not a bug to route around. For device testing use `adb reverse`, which [`tools/run-on-device.sh`](tools/run-on-device.sh) sets up.
 - **A sleeping bridge is a silent app.** Notifications originate at the bridge; a laptop that closes at night delays approvals until it wakes. ADR-005 treats this as a documented limitation with a designed degradation path.
 - **Nothing under [`tools/deploy/`](tools/deploy/) has ever been run against a real cloud account or domain**, and both scripts say so in their own headers: they were checked line-by-line against real `gcloud` / `cloudflared --help` output, but nothing that provisions or spends was executed. `bridge/Dockerfile` has likewise never been built (no Docker daemon in the authoring environment). Treat all three as reviewed-but-unexercised. Also: the GCP setup is **not** $0 — the external IPv4 is ~$3/month; see [`docs/HOSTING.md`](docs/HOSTING.md) §3.
+- **An Access application scoped to the whole bridge hostname breaks the app.** `/qr` is Access-gated on purpose; `/`, `/pair` and `/acp` must not be, because the phone has no browser session and cannot complete a Google sign-in. Scope the application to the `/qr` path. `QrPageTest` pins this, and the symptom otherwise (the app suddenly cannot pair *or* connect) points nowhere near its cause.
+- **`Cf-Access-*` headers are not authentication.** The bridge verifies the JWT itself ([`AccessVerifier.kt`](bridge/src/main/kotlin/dev/kiro/bridge/AccessVerifier.kt)) because the origin port is reachable without going through the tunnel — the same flattening that made the control channel a Unix socket. The email `/qr` shows comes out of the verified token; `Cf-Access-Authenticated-User-Email` is displayed nowhere.
 - **`docs/FEATURES.md` anchors are load-bearing.** F-01's heading carries an HTML comment asking you to keep status markers *out* of headings, because three other documents link to its anchor.
 - **`local.properties` is gitignored** and holds `sdk.dir`. It exists on this machine; a fresh clone needs it or `ANDROID_HOME`.
 - **The emulator system image lags `compileSdk`.** `tools/run-emulator.sh` pins API `37.0` `google_apis` `x86_64` and explains that `compileSdk` moves ahead of stable images.

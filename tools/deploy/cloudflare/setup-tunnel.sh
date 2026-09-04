@@ -18,6 +18,11 @@
 # and the failing grep took the whole script down under `set -euo pipefail`
 # one line after a tunnel had actually been created. The rest of the path -
 # login, create, route dns, config, systemd unit - is now verified end to end.
+#
+# NOT verified (2026-09-04): the Cloudflare Access steps this script now prints
+# at the end, for the /qr pairing page. The bridge side of that is tested, but
+# no Access application has been created against a real Zero Trust account, so
+# treat those instructions as reviewed rather than exercised.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -82,10 +87,12 @@ tunnel: $TUNNEL_ID
 credentials-file: $CONFIG_DIR/$TUNNEL_ID.json
 
 ingress:
-  # WebSocket is proxied transparently for an http(s)/ws(s) origin service —
-  # no separate flag needed (Cloudflare has done this by default since 2022).
+  # http, not ws: this origin serves ordinary GETs (/ and /qr) as well as the
+  # /acp WebSocket, and WebSocket is proxied transparently for an http(s) origin
+  # anyway — no separate flag needed (Cloudflare has done this by default since
+  # 2022). The previous \`ws://\` worked but contradicted the sentence above it.
   - hostname: $HOSTNAME
-    service: ws://$BRIDGE_HOST:$BRIDGE_PORT
+    service: http://$BRIDGE_HOST:$BRIDGE_PORT
   - service: http_status:404
 EOF
 
@@ -107,4 +114,43 @@ and needs no TLS flags of its own — cloudflared is what terminates TLS, at
 Cloudflare's edge, using the certificate for your domain, not the bridge's.
 
 Point the app at: wss://$HOSTNAME/acp
+
+ONE THING THE BRIDGE STILL NEEDS. It binds loopback and has no way to discover
+the hostname you just created, so until you tell it, the QR in its pairing
+banner carries ws://127.0.0.1:$BRIDGE_PORT/acp — which on a phone means the
+phone. Tell it, and restart it once:
+
+  echo 'KIRO_BRIDGE_PUBLIC_URL=wss://$HOSTNAME/acp' | sudo tee -a /etc/kiro-bridge.env
+  sudo systemctl restart kiro-bridge
+
+After that, pairing a phone never needs another restart:
+
+  sudo runuser -u bridge -- /opt/kiro-bridge/bin/bridge pair \\
+    --state-dir /home/bridge/.kiro-bridge
+
+which prints a scannable QR of wss://$HOSTNAME/acp plus a fresh code.
+
+PAIRING WITHOUT SSH AT ALL (optional). The bridge can serve the same QR as a web
+page at https://$HOSTNAME/qr, behind Cloudflare Access, so a phone is added by
+opening a URL and signing in with Google — no terminal anywhere. Two steps:
+
+  1. In Zero Trust > Access > Applications, add a self-hosted application for
+     **$HOSTNAME/qr** and give it a policy allowing your own email.
+
+     *** SCOPE IT TO THE /qr PATH, NOT TO $HOSTNAME. ***
+     The phone cannot complete a browser sign-in. An application covering the
+     whole hostname breaks POST /pair and the /acp WebSocket, so the app stops
+     pairing AND stops connecting — and its error will not point at Cloudflare.
+
+  2. Copy the application's Application Audience (AUD) tag from its Overview
+     tab, and your team domain from Zero Trust > Settings > General, then:
+
+       echo 'KIRO_BRIDGE_ACCESS_TEAM_DOMAIN=<your-team>.cloudflareaccess.com' | sudo tee -a /etc/kiro-bridge.env
+       echo 'KIRO_BRIDGE_ACCESS_AUD=<the AUD tag>' | sudo tee -a /etc/kiro-bridge.env
+       sudo systemctl restart kiro-bridge
+
+The bridge verifies that assertion itself — RS256 against your team's published
+signing keys — rather than trusting the header, because its origin port is
+reachable without going through this tunnel. Unconfigured, /qr answers 403 and
+explains what is missing; it is opt-in and off by default.
 EOF

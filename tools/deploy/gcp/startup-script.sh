@@ -93,6 +93,11 @@ if [ -s /etc/kiro-bridge.env.tmp ]; then
 else
   : > /etc/kiro-bridge.env
 fi
+# The bridge binds loopback and cannot discover the hostname a phone reaches it
+# by, so the QR in its pairing banner is only correct once this is set. Left
+# empty here because the hostname does not exist yet; ../cloudflare/setup-tunnel.sh
+# creates it and prints the line to add.
+printf '#KIRO_BRIDGE_PUBLIC_URL=wss://your-hostname/acp\n' >> /etc/kiro-bridge.env
 rm -f /etc/kiro-bridge.env.tmp
 chown root:bridge /etc/kiro-bridge.env
 chmod 640 /etc/kiro-bridge.env

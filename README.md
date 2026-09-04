@@ -4,7 +4,9 @@ An unofficial Android client for [Kiro](https://kiro.dev) **cloud sessions** —
 
 ## Status, at a glance
 
-Of the 26 items in [docs/FEATURES.md](docs/FEATURES.md): **7 done, 5 partial, the rest not started.** Done: project scaffold/CI, the ACP protocol layer, the session gateway, credential storage, session list (delete/pin), the prompt composer. Partial: bridge pairing (multi-bridge list works, QR scan doesn't), the new-session flow, transcript rendering, permission/approval UI, and reconnect/replay hardening.
+Of the 31 items in [docs/FEATURES.md](docs/FEATURES.md): **9 done, 4 partial, the rest not started.** Done: project scaffold/CI, the ACP protocol layer, the session gateway, credential storage, session list (delete/pin), the prompt composer, and bridge pairing — QR scanning plus `kiro-bridge pair`, which mints a code from a running bridge without restarting it. Partial: the new-session flow, transcript rendering, permission/approval UI, and reconnect/replay hardening.
+
+QR scanning uses the Play Services code scanner, so it needs no camera permission — and does not exist on a device without Play Services, where the app hides the scan button and manual entry carries on as before ([F-27](docs/FEATURES.md)).
 
 **The one caveat that matters more than any of those markers:** everything above was built and verified against `FakeGateway` or a local `kiro-cli` session. **Nothing has yet been exercised against a real, paid cloud-session creation** — that costs credits, and none have been spent. Session creation, the approval round-trip, and reconnect-mid-turn replay are the three biggest remaining unknowns, and they're exactly the parts a phone client can't fake its way past.
 
@@ -60,7 +62,7 @@ Four processes, two separate authentications, and one seam the whole app is writ
 ┌──────────────────────────────────────────────────────────────────────┐
 │  BRIDGE HOST — a machine you run                              bridge/│
 │                                                                      │
-│  BridgeServer    Ktor CIO + WebSockets. Two routes, and no more.     │
+│  BridgeServer    Ktor CIO + WebSockets. Three routes, and no more.   │
 │  PairingService  Single-use codes, hashed device tokens, revocation. │
 │  SessionLog      Bounded per-session replay, keyed by the agent's    │
 │                  own messageId — or an explicit "that point is gone".│

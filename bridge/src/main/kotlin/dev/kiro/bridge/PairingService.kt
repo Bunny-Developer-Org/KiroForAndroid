@@ -1,5 +1,6 @@
 package dev.kiro.bridge
 
+import dev.kiro.core.auth.PairingPayload
 import java.io.File
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -36,7 +37,22 @@ public class PairingService(
         val pairedAt: Instant,
     )
 
-    private data class PendingCode(val code: String, val expiresAt: Instant)
+    private data class PendingCode(
+        val code: String,
+        val expiresAt: Instant,
+        val issuedAt: Instant,
+        val source: CodeSource,
+    )
+
+    /**
+     * Which surface printed a code, and therefore which codes it supersedes.
+     *
+     * Load-bearing rather than bookkeeping: `/qr` rotates every 30 seconds, and
+     * without this scoping a browser tab left open on it would retire every code
+     * `kiro-bridge pair` printed, half a minute after the operator read it, with
+     * nothing anywhere explaining why.
+     */
+    public enum class CodeSource { TERMINAL, QR_PAGE }
 
     public sealed interface PairResult {
         public data class Paired(val token: String) : PairResult
@@ -50,29 +66,83 @@ public class PairingService(
     }
 
     /**
-     * Issues a pairing code for the operator to read off the bridge's console (or
-     * scan from the QR it prints). One code at a time: a bridge showing three
-     * simultaneously valid codes is a bridge whose operator has lost track of who
-     * is pairing.
+     * Issues a pairing code.
+     *
+     * `pairingBanner` renders it both ways: as a QR to scan, and as text to read
+     * aloud or type when the QR cannot be drawn or scanned.
+     *
+     * **One code per surface, and a superseded code dies within 30 seconds.** The
+     * older rule was "exactly one pending code, and issuing retires the previous one
+     * instantly". F-29's `/qr` page broke both halves of it, for two different
+     * reasons.
+     *
+     * It rotates the code every 30s so a QR someone photographed, or saw in a screen
+     * share, goes stale almost at once (AUTHENTICATION §4). Instant retirement turns
+     * the *ordinary* case into a failure: the phone decodes at t=29.9s, the page
+     * rotates at t=30s, the POST lands at t=30.2s, and the user is told their code is
+     * not valid on the very screen the feature exists to make pleasant. So
+     * supersession shortens a code's life rather than ending it.
+     *
+     * And retirement is scoped to the [CodeSource] that issued the code, or a browser
+     * tab left open would quietly kill every code `kiro-bridge pair` prints.
+     *
+     * What replaces "exactly one" is this: **every code that will redeem is one a
+     * human is looking at right now, or one that was on a screen within the last 30
+     * seconds.** In steady state that is two per surface. It is not a brute-force
+     * change worth worrying about either way: even at the [MAX_PENDING_CODES]
+     * backstop, that many targets in 32^8 at five attempts a minute is nothing.
+     *
+     * Roads not taken: leaving a superseded code at its full 300s TTL, which would let
+     * a photograph from ten rotations ago still pair -- exactly what rotation exists
+     * to prevent; and rotating with no grace at all, which is the t=30.2s failure.
      */
-    public fun issueCode(): String {
+    public fun issueCode(source: CodeSource): String {
         val code = buildString {
             repeat(CODE_LENGTH) { append(CODE_ALPHABET[random.nextInt(CODE_ALPHABET.length)]) }
         }
-        pendingCodes.clear()
-        pendingCodes[code] = PendingCode(code, clock().plusSeconds(CODE_TTL_SECONDS))
+        val now = clock()
+        synchronized(pendingCodes) {
+            // Unconditional, every call: this is what keeps the map bounded without
+            // depending on anyone ever redeeming anything.
+            pendingCodes.values.removeAll { now.isAfter(it.expiresAt) }
+
+            pendingCodes.replaceAll { _, pending ->
+                if (pending.source != source) {
+                    pending
+                } else {
+                    // minOf, never assignment. Superseding must only ever *shorten* a
+                    // life; assigning would hand a code with five seconds left another
+                    // thirty. This is the line most likely to be "simplified" into a bug.
+                    pending.copy(expiresAt = minOf(pending.expiresAt, now.plusSeconds(SUPERSEDED_GRACE_SECONDS)))
+                }
+            }
+
+            pendingCodes[code] = PendingCode(code, now.plusSeconds(CODE_TTL_SECONDS), now, source)
+
+            // Trimmed *within* the source, never globally. Evicting the oldest entry
+            // overall would let a page rotating faster than the grace displace a code
+            // a terminal just printed -- which is precisely what scoping supersession
+            // by source exists to prevent, undone by a tidy-up. The code just issued
+            // is excluded so it can never evict itself when several share an instant.
+            pendingCodes.values
+                .filter { it.source == source && it.code != code }
+                .sortedByDescending { it.issuedAt }
+                .drop(MAX_PENDING_PER_SOURCE - 1)
+                .forEach { pendingCodes.remove(it.code) }
+        }
         return code
     }
 
     public fun redeem(code: String, deviceName: String, remoteAddress: String): PairResult {
         rateLimit(remoteAddress)?.let { return it }
 
-        val pending = pendingCodes[code.uppercase()]
+        // Single-use, whatever the outcome -- a code that failed because it expired
+        // must not remain redeemable. One atomic remove rather than a get followed by
+        // a remove: the two-step version let two concurrent POSTs of the same code
+        // both pass the lookup and both mint a token, which made "single-use" a
+        // comment rather than a guarantee. Rotation makes a double submit likelier.
+        val pending = pendingCodes.remove(code.uppercase())
             ?: return PairResult.BadCode.also { recordAttempt(remoteAddress) }
-
-        // Single-use, whatever the outcome: a code that failed because it expired
-        // must not remain redeemable.
-        pendingCodes.remove(code.uppercase())
 
         if (clock().isAfter(pending.expiresAt)) return PairResult.Expired
 
@@ -92,6 +162,9 @@ public class PairingService(
     }
 
     public fun listDevices(): List<Device> = devices.values.sortedBy { it.pairedAt }
+
+    /** Test-only window on the pending map, mirroring `BridgeServer.clientCount`. */
+    internal val pendingCount: Int get() = pendingCodes.size
 
     public fun revoke(tokenHash: String): Boolean {
         val removed = devices.remove(tokenHash) != null
@@ -152,10 +225,39 @@ public class PairingService(
     }
 
     public companion object {
-        /** No I, O, 0 or 1 — this gets read aloud and typed in by hand. */
-        public const val CODE_ALPHABET: String = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-        public const val CODE_LENGTH: Int = 8
+        /**
+         * Defined in `core/` so the app cannot disagree with the bridge about what a
+         * code looks like — it has to recognise one coming out of a QR.
+         */
+        public const val CODE_ALPHABET: String = PairingPayload.CODE_ALPHABET
+        public const val CODE_LENGTH: Int = PairingPayload.CODE_LENGTH
         public const val CODE_TTL_SECONDS: Long = 300
+
+        /**
+         * How long a superseded code keeps working. Equal to `/qr`'s rotation period,
+         * which makes the rule one sentence: the code on screen and the one it
+         * replaced, and never further back.
+         */
+        public const val SUPERSEDED_GRACE_SECONDS: Long = 30
+
+        /**
+         * A backstop against pathological growth, not the mechanism that keeps the
+         * set small. **Expiry is that mechanism**: every issue prunes what has
+         * expired, supersession cuts a same-source code to 30 seconds, and a code
+         * lives 300 at the outside.
+         *
+         * Sized well above the steady state on purpose. A tight count looks tidier
+         * and silently breaks the invariant this class promises: `/qr` keeps one
+         * session *per signed-in identity*, so with a cap of two, a third person
+         * opening the page would evict a code the first is looking at right now,
+         * with a countdown still ticking. Eviction must never be able to do that,
+         * so the cap sits where only a pathology reaches it -- at which point
+         * dropping the oldest is the right call anyway.
+         */
+        public const val MAX_PENDING_PER_SOURCE: Int = 128
+
+        /** Derived: [CodeSource] has two entries. */
+        public const val MAX_PENDING_CODES: Int = MAX_PENDING_PER_SOURCE * 2
         public const val TOKEN_BYTES: Int = 32
         public const val MAX_ATTEMPTS_PER_WINDOW: Int = 5
         public const val RATE_WINDOW_SECONDS: Long = 60

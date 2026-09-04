@@ -55,6 +55,11 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.browser)
+    // QR pairing (F-07). No CAMERA permission is declared anywhere on purpose --
+    // the scanning UI runs inside Play Services, not this process. QrScanner
+    // feature-detects it, so a device without Play Services keeps manual entry.
+    implementation(libs.play.services.code.scanner)
+    implementation(libs.play.services.base)
     implementation(libs.ktor.client.okhttp)
 
     implementation(platform(libs.compose.bom))

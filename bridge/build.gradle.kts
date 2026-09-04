@@ -29,6 +29,7 @@ dependencies {
     implementation(libs.ktor.server.cio)
     implementation(libs.ktor.server.websockets)
     implementation(libs.ktor.server.status.pages)
+    implementation(libs.nayuki.qrcodegen)
     implementation(libs.slf4j.api)
     runtimeOnly(libs.logback.classic)
 

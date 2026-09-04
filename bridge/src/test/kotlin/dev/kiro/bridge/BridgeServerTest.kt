@@ -16,6 +16,8 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 
 /**
@@ -134,7 +136,7 @@ class BridgeServerTest {
     }
 
     private fun mintToken(): String {
-        val code = pairing.issueCode()
+        val code = pairing.issueCode(PairingService.CodeSource.TERMINAL)
         val result = pairing.redeem(code, "prober", "127.0.0.1")
         check(result is PairingService.PairResult.Paired) { "unexpected pairing result: $result" }
         return result.token
@@ -146,6 +148,54 @@ class BridgeServerTest {
             .header("X-Kiro-Bridge-Token", token)
             .buildAsync(URI.create("ws://127.0.0.1:$port/acp"), listener)
             .get(5, TimeUnit.SECONDS)
+
+    /**
+     * A bare 404 tells someone who found this hostname nothing -- not even whether
+     * they reached the bridge or something in front of it.
+     */
+    @Test
+    fun `the root path says what this is`() {
+        val body = get("/")
+
+        assertTrue("kiro-bridge" in body, body)
+        assertTrue("github.com/Bunny-Developer-Org/KiroForAndroid" in body, body)
+        assertTrue("/pair" in body && "/acp" in body, "it should name the routes it has: $body")
+    }
+
+    /**
+     * The page is reachable by anyone who can resolve the hostname, so the property
+     * worth pinning is that it never describes *this* bridge -- only what a bridge
+     * is. Byte-identical before and after a device pairs is the strongest way to say
+     * that: it holds however the wording changes, and it fails the moment somebody
+     * interpolates a device count, an account, or a status into it.
+     */
+    @Test
+    fun `the root path says nothing about this particular bridge`() {
+        val before = get("/")
+        val token = mintToken() // also pairs a device called "prober"
+        val after = get("/")
+
+        assertEquals(before, after, "the root page changed once a device paired")
+        assertFalse(token in after, "a device token reached the public root page")
+        assertFalse("prober" in after, "a paired device's name reached the public root page")
+    }
+
+    /** An unknown path should point somewhere useful rather than answer with nothing. */
+    @Test
+    fun `an unknown path is a 404 that says where to look`() {
+        val response = HttpClient.newHttpClient().send(
+            java.net.http.HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port/nonsense")).build(),
+            java.net.http.HttpResponse.BodyHandlers.ofString(),
+        )
+
+        assertEquals(404, response.statusCode())
+        assertTrue("GET /" in response.body(), response.body())
+    }
+
+    private fun get(path: String): String = HttpClient.newHttpClient().send(
+        java.net.http.HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port$path")).build(),
+        java.net.http.HttpResponse.BodyHandlers.ofString(),
+    ).body()
 
     private fun freePort(): Int = java.net.ServerSocket(0).use { it.localPort }
 

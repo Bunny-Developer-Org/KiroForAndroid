@@ -110,6 +110,45 @@ one item because they are all in the create-session and transcript screens.
   can wait.
 - **Depends on:** nothing. All six are app-layer.
 
+### F-26 · Pairing rate limiting is one global bucket behind a tunnel · `S`
+Found while building F-07's QR pairing, and pre-existing rather than introduced by it. `PairingService.rateLimit` keys on `remoteAddress`, which `BridgeServer` reads from `call.request.origin.remoteHost` — but `cloudflared` connects to `http://127.0.0.1:8765`, so **every** tunnelled client presents the same address. On a tunnelled bridge the per-address limiter is therefore a single global bucket of 5 attempts per 60 seconds.
+
+- **Do:** keep the per-address limiter for a directly-bound bridge, add a separate global limiter with a much higher ceiling, and prune empty windows from the `attempts` map (it is only bounded today because every key is identical).
+- **Done when:** junk traffic to `POST /pair` cannot stop a legitimate user redeeming a valid code, and the `attempts` map cannot grow without bound.
+- **The failure is availability, not brute force.** 32⁸ ≈ 1.1×10¹² codes at 5/min is not attackable. But `rateLimit` is checked *before* the code is looked at, so five junk requests from any internet scanner make a correct code answer `429` until the window clears — on the exact screen F-07 exists to make pleasant, and plausible daily on a publicly-tunnelled bridge.
+- **Do not naively trust a forwarded header.** `cloudflared` sets `CF-Connecting-IP`; honouring either that or `X-Forwarded-For` without a trusted-proxy list just moves the forgery one header over.
+- **Depends on:** nothing.
+
+### F-27 · QR scanning without Play Services · `M`
+F-07 scans with `play-services-code-scanner`, which needs no `CAMERA` permission and no preview UI — a large win, at the cost of a hard Google Play Services dependency. The app feature-detects it and falls back to manual entry, so nothing is broken without it, but the population most likely to self-host a bridge and sideload an unofficial APK is also disproportionately likely to run GrapheneOS, LineageOS or microG.
+
+- **Do:** a second `QrScanner` implementation selected at runtime when Play Services is absent — ZXing-core (Apache-2.0, pure JVM, so the decoder itself could live in `core/` and be unit-tested) plus CameraX behind a `CAMERA` permission prompt and a preview screen obeying [VISUAL-LANGUAGE](VISUAL-LANGUAGE.md).
+- **Done when:** a device with no Play Services can scan, and the permission-denied path says what to do next rather than dead-ending.
+- **Scope out:** replacing the Play Services path where it exists. It is smaller, needs no permission, and is the better experience.
+- **Depends on:** F-07.
+
+### F-28 · Pairing state does not survive an Activity recreation · `S`
+Pre-existing, and made a little more visible by F-07. `AppRoot` holds every piece of pairing state in `remember` rather than a ViewModel or `rememberSaveable`, and `MainActivity` declares no `configChanges`. A rotation, a dark-mode toggle from quick settings, a font- or display-size change, split-screen resize, or "Don't keep activities" therefore recreates the Activity and resets `bridgeView` to `Hidden`, dropping a user out of "add another bridge" mid-flow. F-07 made `PairingScreen`'s own address and code fields `rememberSaveable`, which covers the typing but not the rest.
+
+- **Do:** hoist pairing state into a ViewModel (or `rememberSaveable` with savers), so bridge management survives recreation.
+- **Done when:** rotating the device during "add another bridge" leaves the user where they were.
+- **The sharp edge is an in-flight QR scan.** `GmsQrScanner.scan` suspends on `rememberCoroutineScope()`, so a recreation while the Play Services scanner is in front cancels the continuation and the result is discarded with **no error and no explanation** — the one outcome `ScanMessages` is written to prevent. That needs the scan hoisted out of composition, not just saved state.
+- **Depends on:** F-07.
+
+### F-29 · Pair without SSH: a Cloudflare-Access-gated `/qr` page · `M` · ✅ **DONE 2026-09-04** (bridge side; not yet exercised against a real Zero Trust account)
+F-07 removed the *restart*, not the *SSH*: every way to get a pairing code still needed a terminal on the bridge host, which for the recommended always-on shape ([HOSTING §5](HOSTING.md)) means SSHing into a GCE VM to add a phone. `/qr` serves the same QR as a page behind Cloudflare Access, so pairing becomes: open a URL, sign in with Google, scan.
+
+- **Do:** `GET /qr`, served only to a browser whose `Cf-Access-Jwt-Assertion` the bridge has verified itself. Server-rendered HTML, QR as inline SVG, `<meta http-equiv="refresh">` so it needs no JavaScript, and a code that rotates every 30s.
+- **Done when:** a user opens `https://<bridge>/qr` on a laptop, signs in, scans, and pairs — with no SSH anywhere.
+- **`/`, `/pair` and `/acp` must NOT be Access-gated.** The phone cannot complete an interactive browser login, so an Access application scoped to the whole hostname breaks pairing *and* the session socket, with an error pointing nowhere near Cloudflare. `QrPageTest` pins this, and the warning is repeated in five places on purpose.
+- **The headers are not authentication.** The origin port is reachable without going through the tunnel, so `AccessVerifier` checks RS256 against the team JWKS plus `alg`, `exp`, `nbf`, `iss` and `aud`, and shows the email from the *verified token*. Stricter than the reference implementation it was modelled on, which omits the `alg` check and treats a missing `exp` as valid.
+- **Rotation replaced `PairingService`'s single-code rule.** Supersession now *shortens* a code to 30s rather than killing it — instant retirement makes the ordinary case fail, since a phone that decodes at t=29.9s POSTs at t=30.2s — and is scoped per surface, so a browser tab cannot retire a code `kiro-bridge pair` just printed. See [AUTHENTICATION §4](AUTHENTICATION.md#4-auth-1-pairing-the-app-to-the-bridge) for the property that replaces it.
+- **An open tab is a code-minting loop, and is bounded**: rotation is time-based (a reload re-renders rather than mints), the session stops after 20 codes or 10 minutes, and a device arriving ends it. Restarting is a form POST, which no refresh or prefetcher can fire.
+- **Fixed alongside:** `redeem` read a code and *then* removed it, so two concurrent POSTs of one code both minted a token — "single-use" was a comment rather than a guarantee. Now one atomic `remove`, pinned by a threaded test.
+- **No new dependency.** JDK crypto and `kotlinx-serialization`; the version catalog is untouched.
+- **Interaction with F-26:** `/qr` does not worsen the global rate-limit bucket, which counts redemptions rather than issuance — but if F-26 is biting, a perfectly good `/qr` code returns 429 and the page cannot know.
+- **Depends on:** F-07. Needs a Cloudflare Zero Trust account (free tier) and the Tunnel from HOSTING §5.
+
 ---
 
 ## Phase 1 — Foundation
@@ -158,10 +197,14 @@ The host-side process from ADR-001. Not a dev convenience — it is the product'
 
 Read [AUTHENTICATION.md](AUTHENTICATION.md) in full before starting any of these. The two-authentication split (app↔bridge vs bridge↔Kiro) is the thing to get right.
 
-### F-07 · Bridge pairing UX · `M` · 🟡 **PARTIAL** — manual entry, honest onboarding copy, distinct error states, and the multi-bridge list (add/remove/switch) done 2026-09-02; QR scan is not
+### F-07 · Bridge pairing UX · `M` · ✅ **DONE 2026-09-04** — manual entry, onboarding copy, error states and the multi-bridge list 2026-09-02; QR scanning and `kiro-bridge pair` 2026-09-04
 - **Do:** onboarding that pairs the app to a bridge — QR scan (bridge prints a QR of `wss://host:port` + pairing code) plus manual entry fallback. Clear, non-generic error states for unreachable host, bad code, expired code, TLS failure.
 - **Done when:** a user can pair by scanning, the token persists via F-06, and a wrong/expired code produces a message that says what to do next.
-- **Multi-bridge list shipped 2026-09-02**: `BridgeListScreen` (add another bridge, remove with confirmation, switch active bridge) against the already-built `BridgeRegistry`/`DataStoreBridgeRegistry`. QR scanning remains undone — it needs a new camera dependency (no CameraX/ML-Kit/ZXing in the catalog today) and is a separately-scoped follow-up.
+- **Multi-bridge list shipped 2026-09-02**: `BridgeListScreen` (add another bridge, remove with confirmation, switch active bridge) against the already-built `BridgeRegistry`/`DataStoreBridgeRegistry`.
+- **QR pairing shipped 2026-09-04.** `PairingPayload` in `core/` is the single definition of the payload, so the bridge that writes it and the app that reads it cannot drift; `TerminalQr` draws it with half-block glyphs; the app scans with the Play Services code scanner, which needs **no `CAMERA` permission** and is feature-detected, so a device without Play Services simply keeps the manual form.
+- **`kiro-bridge pair` shipped alongside it, and is the larger half of the win.** Minting a code used to mean restarting the bridge — dropping every attached client — because a code is only valid inside the process that will redeem it. It now comes from the running bridge over a `0600` Unix domain socket in the state directory. Deliberately *not* an HTTP route: behind a tunnel every request presents `remoteHost == 127.0.0.1`, so an origin check would be satisfied by the whole internet ([AUTHENTICATION §4](AUTHENTICATION.md#4-auth-1-pairing-the-app-to-the-bridge)).
+- **`--public-url` is required behind a tunnel**, and the one way to deploy this wrong: the bridge binds loopback and cannot discover the hostname a phone uses, so without it the QR carries `ws://127.0.0.1:8765/acp`. The banner says so when it is unset, and `setup-tunnel.sh` prints the line to add.
+- **Verified 2026-09-04** against the real binary, not only unit tests: a code minted over the socket exchanged for a real device token while the server stayed up (one process start, no restart); the previous code was retired; a second bridge on one state directory was refused; and the refusal left the running bridge's socket intact — a bug the unit suite missed and only running it surfaced. **Not yet verified: a phone actually scanning one.** That waits on a real device against the hosted bridge.
 - **Onboarding must state honestly that a bridge host is required** (ADR-001 §4) — on the first screen, not buried in a help page. Follow the five-step order in [ADR-005 §5.4](adr/ADR-005-bridge-hosting-and-availability.md#54-onboarding-tells-the-truth-in-this-order): state the requirement → recommend an always-on host and name what a workstation-only bridge costs → pair → sign in to Kiro → **connect a source provider** in Kiro's own settings via Custom Tab. Skipping the last step leaves F-11's repository picker empty with nothing to explain why.
 - **Pair with a *list* of bridges, not one** ([ADR-005 §5.2](adr/ADR-005-bridge-hosting-and-availability.md#52-multiple-bridges-are-a-supported-configuration-not-an-accident)). Sessions live in the Kiro account, so any bridge signed in as the same account can reach them; store bridges with a per-bridge last-seen.
 - **Depends on:** F-03, F-06.

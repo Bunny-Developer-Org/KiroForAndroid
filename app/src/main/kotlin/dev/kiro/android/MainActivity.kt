@@ -19,13 +19,18 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import dev.kiro.android.platform.GmsQrScanner
 import dev.kiro.android.platform.PairingClient
+import dev.kiro.android.platform.QrScanner
 import dev.kiro.android.service.Backoff
 import dev.kiro.android.ui.AppNavigation
 import dev.kiro.android.ui.bridges.BridgeListScreen
 import dev.kiro.android.ui.onboarding.PairingScreen
+import dev.kiro.android.ui.onboarding.ScannedPairing
+import dev.kiro.android.ui.onboarding.scanErrorMessage
 import dev.kiro.android.ui.theme.KiroTheme
 import dev.kiro.core.auth.PairedBridge
+import dev.kiro.core.auth.PairingPayload
 import dev.kiro.core.session.CloudSessionGateway
 import dev.kiro.core.session.ConnectionState
 import kotlinx.coroutines.async
@@ -68,7 +73,10 @@ class MainActivity : ComponentActivity() {
                             .padding(innerPadding)
                             .safeDrawingPadding(),
                     ) {
-                        AppRoot()
+                        // Constructed here, not in ServiceLocator: the Play Services
+                        // scanner presents its own UI and needs an Activity, which
+                        // ServiceLocator (application context only) cannot give it.
+                        AppRoot(scanner = remember { GmsQrScanner(this@MainActivity) })
                     }
                 }
             }
@@ -86,9 +94,11 @@ class MainActivity : ComponentActivity() {
 private enum class BridgeManagementView { Hidden, List, Add }
 
 @Composable
-private fun AppRoot() {
+private fun AppRoot(scanner: QrScanner) {
     val scope = rememberCoroutineScope()
     var paired by remember { mutableStateOf<PairedBridge?>(null) }
+    var scanAvailable by remember { mutableStateOf(false) }
+    var scanned by remember { mutableStateOf<ScannedPairing?>(null) }
     var connection by remember { mutableStateOf<ConnectionState>(ConnectionState.Disconnected) }
     var gateway by remember { mutableStateOf<CloudSessionGateway>(ServiceLocator.gateway()) }
     var pairingError by remember { mutableStateOf<String?>(null) }
@@ -122,10 +132,35 @@ private fun AppRoot() {
         }
     }
 
+    // Shared by both pairing entry points, same as pair() above. A cancelled scan
+    // is silent: backing out of the scanner is not a mistake and must not leave an
+    // error on screen.
+    fun scan() {
+        pairingError = null
+        scope.launch {
+            when (val outcome = scanner.scan()) {
+                is QrScanner.Outcome.Scanned ->
+                    when (val decoded = PairingPayload.decode(outcome.raw)) {
+                        is PairingPayload.DecodeResult.Ok ->
+                            scanned = ScannedPairing(decoded.payload.url, decoded.payload.code, System.nanoTime())
+                        else -> pairingError = scanErrorMessage(decoded)
+                    }
+                QrScanner.Outcome.Cancelled -> Unit
+                is QrScanner.Outcome.Unavailable -> {
+                    // Permanent for this device, so stop offering it.
+                    scanAvailable = false
+                    pairingError = outcome.message
+                }
+                is QrScanner.Outcome.Failed -> pairingError = outcome.message
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         val all = ServiceLocator.bridges.list()
         bridgeList = all
         paired = all.firstOrNull()
+        scanAvailable = scanner.isAvailable()
     }
 
     LaunchedEffect(paired) {
@@ -139,6 +174,10 @@ private fun AppRoot() {
             onPair = { url, code -> pair(url, code) { bridge -> paired = bridge } },
             errorMessage = pairingError,
             busy = busy,
+            scanAvailable = scanAvailable,
+            scanned = scanned,
+            onScanRequested = ::scan,
+            onScanConsumed = { scanned = null },
         )
     } else {
         PairedContent(
@@ -186,6 +225,10 @@ private fun AppRoot() {
                     bridgeView = BridgeManagementView.List
                 }
             },
+            scanAvailable = scanAvailable,
+            scanned = scanned,
+            onScanRequested = ::scan,
+            onScanConsumed = { scanned = null },
         )
     }
 }
@@ -206,6 +249,10 @@ private fun PairedContent(
     onAddBridge: () -> Unit,
     onBackFromBridgeList: () -> Unit,
     onPairAdditionalBridge: (url: String, code: String) -> Unit,
+    scanAvailable: Boolean,
+    scanned: ScannedPairing?,
+    onScanRequested: () -> Unit,
+    onScanConsumed: () -> Unit,
 ) {
     when (bridgeView) {
         BridgeManagementView.Hidden ->
@@ -224,7 +271,15 @@ private fun PairedContent(
             )
 
         BridgeManagementView.Add ->
-            PairingScreen(onPair = onPairAdditionalBridge, errorMessage = pairingError, busy = busy)
+            PairingScreen(
+                onPair = onPairAdditionalBridge,
+                errorMessage = pairingError,
+                busy = busy,
+                scanAvailable = scanAvailable,
+                scanned = scanned,
+                onScanRequested = onScanRequested,
+                onScanConsumed = onScanConsumed,
+            )
     }
 }
 

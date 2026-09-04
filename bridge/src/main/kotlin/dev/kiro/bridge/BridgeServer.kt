@@ -15,10 +15,12 @@ import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.origin
+import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.header
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
+import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets
@@ -35,6 +37,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.slf4j.LoggerFactory
+import java.time.Instant
 
 /**
  * The bridge's network face.
@@ -49,12 +52,34 @@ import org.slf4j.LoggerFactory
  * So this owns exactly four things KAS does not: authentication, transport
  * security, process supervision, and a replay log for a client that was offline.
  */
-public class BridgeServer(
+public class BridgeServer internal constructor(
     private val config: BridgeConfig,
     private val supervisor: CliSupervisor,
     private val pairing: PairingService,
     private val scope: CoroutineScope,
+    // Injected so tests can drive rotation with a fake clock and a fake JWKS; both
+    // carry their own clock. `AccessVerifier` and `QrPageBudget` are internal (as
+    // `ControlSocket` is), which is why this constructor is too and the public one
+    // below delegates to it.
+    private val verifier: AccessVerifier?,
+    private val budget: QrPageBudget,
 ) {
+
+    public constructor(
+        config: BridgeConfig,
+        supervisor: CliSupervisor,
+        pairing: PairingService,
+        scope: CoroutineScope,
+    ) : this(
+        config,
+        supervisor,
+        pairing,
+        scope,
+        verifier = config.accessTeamDomain?.let { domain ->
+            config.accessAudience?.let { aud -> AccessVerifier(domain, aud, Instant::now) }
+        },
+        budget = QrPageBudget(Instant::now),
+    )
 
     private val log = LoggerFactory.getLogger(BridgeServer::class.java)
     private val sessionLog = SessionLog(config.replayBufferSize)
@@ -76,8 +101,26 @@ public class BridgeServer(
                 pingPeriod = config.webSocketPingPeriod
                 timeout = config.webSocketPongTimeout
             }
+            install(StatusPages) {
+                // Ktor's stock 404 has an empty body, which tells someone who
+                // mistyped a path nothing at all -- including whether they even
+                // reached the bridge or something in front of it.
+                status(HttpStatusCode.NotFound) { call, status ->
+                    call.respondText(
+                        status = status,
+                        contentType = ContentType.Text.Plain,
+                        text = "Not a route on this bridge. GET / says what this is.\n",
+                    )
+                }
+            }
             routing { installRoutes() }
         }
+
+        // Fire and forget, deliberately: a typo'd team domain should be visible in
+        // the log at startup rather than discovered when somebody opens /qr, but the
+        // bridge's boot must not depend on Cloudflare's being reachable -- the same
+        // rule the --public-url log line follows.
+        verifier?.let { scope.launch { it.warmUp() } }
 
         // One fan-out from the agent to every attached client. KAS already keeps
         // per-session subscriber sets, so this stays a broadcast rather than a
@@ -97,10 +140,20 @@ public class BridgeServer(
     }
 
     /**
-     * Two routes and nothing else. `/pair` is the only unauthenticated one, and
-     * everything it can do is bounded by [PairingService].
+     * Three routes and nothing else. `/` and `/pair` are the unauthenticated ones,
+     * and everything `/pair` can do is bounded by [PairingService].
      */
     private fun Route.installRoutes() {
+        installQrRoutes(config, pairing, verifier, budget)
+
+        // Reachable by anyone who can resolve the hostname, so it says only what
+        // the hostname already gives away. Someone who lands here deserves to know
+        // what the thing is; nobody needs to learn from it which Kiro account it
+        // holds, what it is working on, or how many phones have paired with it.
+        get("/") {
+            call.respondText(ROOT_PAGE, ContentType.Text.Plain)
+        }
+
         // Auth-1's only unauthenticated endpoint, and the one the app hits
         // first. Everything it can do is bounded by PairingService: the
         // code is single-use, short-lived, and rate limited per address.
@@ -143,8 +196,8 @@ public class BridgeServer(
                     status = HttpStatusCode.Forbidden,
                     contentType = ContentType.Application.Json,
                     text = errorBody(
-                        "That pairing code has expired. Run the bridge with --pair " +
-                            "to print a new one.",
+                        "That pairing code has expired. Run `kiro-bridge pair` on the " +
+                            "machine running the bridge to print a new one.",
                     ),
                 )
 
@@ -284,6 +337,41 @@ public class BridgeServer(
         buildJsonObject { put("error", message) }.toString()
 
     public companion object {
+        /**
+         * What a browser gets at `/`.
+         *
+         * Every line here is public. It names the project, because someone who
+         * finds this hostname should be able to work out what it is rather than
+         * guess, and it names the other two routes, because they are discoverable in a
+         * public repository anyway. It states no operational fact -- not the
+         * account, not the workload, not the paired devices, not even whether the
+         * agent is currently up, which would make this a free availability oracle.
+         */
+        public val ROOT_PAGE: String = """
+            kiro-bridge
+
+            The host-side relay for KiroForAndroid, an unofficial Android client for
+            Kiro cloud sessions:
+
+              https://github.com/Bunny-Developer-Org/KiroForAndroid
+
+            Three routes past this page, and nothing else:
+
+              GET  /qr     a pairing page, if this bridge has been given a
+                           Cloudflare Access application to sit behind
+              POST /pair   exchange a single-use pairing code for a device token
+              GET  /acp    the agent WebSocket -- requires that token
+
+            A pairing code is printed by the bridge on the machine that runs it, as
+            text and as a QR. If that machine is yours, `kiro-bridge pair` prints a
+            fresh one without restarting anything.
+
+            This page is deliberately incurious about its own bridge: it will not
+            tell you which Kiro account is signed in here, what it is working on, or
+            who has paired with it.
+
+        """.trimIndent()
+
         /** Ours, not ACP's. Namespaced so the two can never be confused. */
         public const val BRIDGE_NAMESPACE: String = "_bridge/"
         public const val METHOD_RESUME: String = "_bridge/resume"

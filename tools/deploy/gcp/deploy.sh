@@ -220,7 +220,26 @@ picks the credential up:
   gcloud compute ssh $INSTANCE_NAME --zone=$ZONE --project=$PROJECT_ID \\
     --tunnel-through-iap --command="sudo systemctl restart kiro-bridge"
 
-The pairing code was printed on the bridge's first start — see it with:
+TO PAIR A PHONE, mint a fresh code on the running bridge. It prints a QR in your
+own terminal, needs no restart, and drops no connected client:
+
   gcloud compute ssh $INSTANCE_NAME --zone=$ZONE --project=$PROJECT_ID \\
-    --tunnel-through-iap --command="sudo journalctl -u kiro-bridge --no-pager | grep -A4 'Pair this bridge'"
+    --tunnel-through-iap --command="sudo runuser -u bridge -- \\
+      /opt/kiro-bridge/bin/bridge pair --state-dir /home/bridge/.kiro-bridge"
+
+Run it as the bridge user, as above: the state directory holding the control
+socket is that user's, so a bare \`bridge pair\` looks in your home directory and
+reports — accurately, but unhelpfully — that no bridge is running there.
+
+The code printed at the bridge's first start is almost certainly expired (they
+last five minutes), which is why the command above is the one to use. If you do
+want the startup banner, take it from the journal whole rather than through a
+fixed -A window, which the QR overflows:
+  gcloud compute ssh $INSTANCE_NAME --zone=$ZONE --project=$PROJECT_ID \\
+    --tunnel-through-iap --command="sudo journalctl -u kiro-bridge --no-pager | sed -n '/Pair this bridge/,\$p'"
+
+BEHIND A TUNNEL, SET THE PUBLIC URL. The bridge binds loopback and cannot
+discover the hostname your phone uses, so without this its QR carries
+ws://127.0.0.1:$BRIDGE_PORT/acp — an address that, on the phone, means the phone.
+setup-tunnel.sh prints the exact line once the hostname exists.
 EOF
