@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -73,6 +74,14 @@ public class BridgeGateway(
      * simply stays more cautious when it is not supplied.
      */
     private val bridgeAuthMode: PairedBridge.AuthMode = PairedBridge.AuthMode.UNKNOWN,
+    /**
+     * Where the model catalogue survives a restart.
+     *
+     * See [ModelCatalogStore] for why it has to: the protocol offers no way to
+     * list models without a session, so a create screen on a cold start has
+     * nothing to show unless the last list was written down.
+     */
+    private val modelCatalogStore: ModelCatalogStore = ModelCatalogStore.None,
 ) : CloudSessionGateway {
 
     private val _connection = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
@@ -129,6 +138,7 @@ public class BridgeGateway(
             throw e
         }
         startRouting()
+        seedCatalogFromStore()
 
         val result = try {
             client.initialize()
@@ -152,6 +162,23 @@ public class BridgeGateway(
     }
 
     private fun startRouting() {
+        // The socket dying used to stop here. AcpClient's pump caught the failure,
+        // logged one line and ended; nothing above it was told, so this gateway
+        // went on reporting Connected over a dead connection and the app's
+        // reconnect loop -- which waits on exactly this flow -- never woke up. The
+        // first the user heard of it was the raw OS text of the next failed send:
+        // "failed to send: Software caused connection abort".
+        //
+        // One-shot rather than a running collect: a client is not reusable, so the
+        // first `false` is the last word this gateway has on the subject.
+        scope.launch {
+            client.live.first { !it }
+            if (_connection.value != ConnectionState.Disconnected) {
+                logger.warn("bridge connection dropped")
+                _connection.value = ConnectionState.Disconnected
+            }
+        }
+
         scope.launch {
             client.notifications.collect { notification ->
                 when (notification.method) {
@@ -445,12 +472,13 @@ public class BridgeGateway(
      * cloud `session/new` and `session/load` — leaves the existing snapshot alone
      * rather than overwriting a known selection with an empty one.
      */
-    private fun recordModelsFromResult(sessionId: String, result: JsonElement?) {
+    private suspend fun recordModelsFromResult(sessionId: String, result: JsonElement?) {
         val selection = ConfigOptionParser.parse(result).modelSelection()
         if (selection.isKnown) recordModels(sessionId, selection)
     }
 
-    private fun recordModels(sessionId: String, selection: ModelSelection) {
+    private suspend fun recordModels(sessionId: String, selection: ModelSelection) {
+        val before = _models.value.lastKnownCatalog
         _models.value = _models.value.let { state ->
             ModelState(
                 bySession = state.bySession + (sessionId to selection),
@@ -459,6 +487,32 @@ public class BridgeGateway(
                 // create screen is relying on.
                 lastKnownCatalog = selection.available.ifEmpty { state.lastKnownCatalog },
             )
+        }
+        val after = _models.value.lastKnownCatalog
+        // Only on an actual change: `config_option_update` arrives repeatedly
+        // through a session and re-writing an identical list on each one would
+        // put a disk write on a notification path for nothing.
+        if (after.isNotEmpty() && after != before) {
+            runCatching { modelCatalogStore.write(after) }
+                .onFailure { logger.warn("could not persist the model catalogue: ${it.message}") }
+        }
+    }
+
+    /**
+     * Loads the remembered catalogue, if this connection has not already learned
+     * a better one.
+     *
+     * Fire-and-forget on [scope] rather than awaited in [connect]: a create screen
+     * with no models yet is a working screen, and making the handshake wait on a
+     * disk read would trade something that matters for something that does not.
+     */
+    private fun seedCatalogFromStore() {
+        scope.launch {
+            val remembered = runCatching { modelCatalogStore.read() }.getOrDefault(emptyList())
+            if (remembered.isEmpty()) return@launch
+            _models.value = _models.value.let { state ->
+                if (state.lastKnownCatalog.isEmpty()) state.copy(lastKnownCatalog = remembered) else state
+            }
         }
     }
 

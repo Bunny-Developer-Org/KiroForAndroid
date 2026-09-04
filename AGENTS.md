@@ -8,7 +8,7 @@ Written for an agent that has just been dropped into this repo and needs to be u
 
 An unofficial **Android client for [Kiro](https://kiro.dev) cloud sessions** — agent runs that live in a managed cloud sandbox and keep running after the client disconnects. Kiro publishes no third-party API, so the app cannot reach Kiro directly. Instead it talks to a **bridge**: a small Kotlin/JVM process you run yourself on a host where `kiro-cli` is installed and signed in; the bridge supervises `kiro-cli acp` and relays it to the phone over an authenticated WebSocket. That constraint is the origin of nearly every structural decision here and is argued in [ADR-001](docs/adr/ADR-001-cloud-session-access.md).
 
-Status, per [`README.md`](README.md) and [`docs/FEATURES.md`](docs/FEATURES.md): 7 of 26 backlog items done, 5 partial. **The caveat the README puts in bold and you should carry with you: nothing has been exercised against a real, paid cloud-session creation yet.** Work verified so far ran against `FakeGateway` or a local `kiro-cli`.
+Status, per [`README.md`](README.md) and [`docs/FEATURES.md`](docs/FEATURES.md): 8 of 28 backlog items done, 6 partial. **The caveat the README puts in bold and you should carry with you: nothing has been exercised against a real, paid cloud-session creation yet.** Work verified so far ran against `FakeGateway` or a local `kiro-cli`.
 
 ---
 
@@ -111,7 +111,7 @@ Read [ADR-001](docs/adr/ADR-001-cloud-session-access.md) and [PROTOCOL-FINDINGS]
 | [`docs/HOSTING.md`](docs/HOSTING.md) | The concrete "how" for ADR-005 Option B: a fully cloud-hosted bridge on GCE + Cloudflare Tunnel, with a cost table (~$3/month, not $0) and an explicit verified/unverified section. |
 | [`docs/VISUAL-LANGUAGE.md`](docs/VISUAL-LANGUAGE.md) | Not an ADR. Constrains look, so parallel screen work produces one app. Gives numbers; use them. |
 | [`docs/PRIOR-ART.md`](docs/PRIOR-ART.md) | Other unofficial Kiro clients, surveyed 2026-09-02. None reaches cloud sessions. |
-| [`docs/FEATURES.md`](docs/FEATURES.md) | The backlog (`F-00`…`F-24`, 26 headings — `F-19` appears twice) with per-item status — the freshest source of truth for what is done. **Its "How to pick up an item" section is effectively this repo's contribution guide.** |
+| [`docs/FEATURES.md`](docs/FEATURES.md) | The backlog (`F-00`…`F-26`, 28 headings — `F-19` appears twice, and `F-24`–`F-26` sit out of numeric order) with per-item status — the freshest source of truth for what is done. **Its "How to pick up an item" section is effectively this repo's contribution guide.** |
 
 ---
 

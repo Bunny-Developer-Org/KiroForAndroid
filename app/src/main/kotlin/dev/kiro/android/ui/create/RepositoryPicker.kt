@@ -84,7 +84,6 @@ internal fun RepositoryPicker(
     onRetryCatalog: () -> Unit,
 ) {
     val colors = KiroTheme.colors
-    val reduceMotion = LocalReduceMotion.current
     val selectedSlugs = state.selected.map { it.slug }.toSet()
     var open by rememberSaveable { mutableStateOf(false) }
     var lastSelectedCount by rememberSaveable { mutableIntStateOf(state.selected.size) }
@@ -122,25 +121,7 @@ internal fun RepositoryPicker(
 
         if (!open) CollapsedCatalogNote(state.catalog)
 
-        AnimatedVisibility(
-            visible = open,
-            enter = fadeIn(
-                tween(KiroMotion.duration(KiroMotion.SLIDE_UP_MILLIS, reduceMotion)),
-            ) + expandVertically(
-                tween(
-                    KiroMotion.duration(KiroMotion.SLIDE_UP_MILLIS, reduceMotion),
-                    easing = KiroMotion.Ease,
-                ),
-            ),
-            exit = fadeOut(
-                tween(KiroMotion.duration(KiroMotion.SHEET_OUT_MILLIS, reduceMotion)),
-            ) + shrinkVertically(
-                tween(
-                    KiroMotion.duration(KiroMotion.SHEET_OUT_MILLIS, reduceMotion),
-                    easing = KiroMotion.SheetOut,
-                ),
-            ),
-        ) {
+        DisclosurePanel(open) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 NotConnectedProviderLines(state.providers, onConnectProvider)
                 RecentReposSection(state.recents, selectedSlugs, onToggle)
@@ -168,6 +149,40 @@ internal fun RepositoryPicker(
                 color = colors.muted,
             )
         }
+    }
+}
+
+/**
+ * The open half of a disclosure, animated the way this screen's pickers agree to
+ * animate.
+ *
+ * Shared by [RepositoryPicker] and the create screen's model dropdown so the two
+ * controls on one form do not expand at visibly different speeds — and so the
+ * reduce-motion honouring is written once rather than remembered twice.
+ */
+@Composable
+internal fun DisclosurePanel(visible: Boolean, content: @Composable () -> Unit) {
+    val reduceMotion = LocalReduceMotion.current
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(
+            tween(KiroMotion.duration(KiroMotion.SLIDE_UP_MILLIS, reduceMotion)),
+        ) + expandVertically(
+            tween(
+                KiroMotion.duration(KiroMotion.SLIDE_UP_MILLIS, reduceMotion),
+                easing = KiroMotion.Ease,
+            ),
+        ),
+        exit = fadeOut(
+            tween(KiroMotion.duration(KiroMotion.SHEET_OUT_MILLIS, reduceMotion)),
+        ) + shrinkVertically(
+            tween(
+                KiroMotion.duration(KiroMotion.SHEET_OUT_MILLIS, reduceMotion),
+                easing = KiroMotion.SheetOut,
+            ),
+        ),
+    ) {
+        content()
     }
 }
 

@@ -32,6 +32,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 
@@ -253,12 +254,21 @@ private suspend fun reconnectLoop(
                     ConnectionState.Connected(agentSupportsCloudSessions = true, supportsImages = true),
                 )
                 try {
-                    activeGtw.connection.collect { conn ->
-                        setConnection(conn)
-                        if (conn !is ConnectionState.Connected) {
-                            setGateway(ServiceLocator.gateway())
+                    // `first`, not `collect`. A plain collect never returns -- the
+                    // gateway's connection is a StateFlow, so it has no end -- which
+                    // meant that once the socket dropped this loop sat inside it
+                    // forever and the backoff below was unreachable. The app stayed
+                    // on a dead gateway until it was force-quit. Returning on the
+                    // first non-live state is what makes the retry underneath this
+                    // actually run.
+                    activeGtw.connection
+                        .onEach { conn ->
+                            setConnection(conn)
+                            if (conn !is ConnectionState.Connected) {
+                                setGateway(ServiceLocator.gateway())
+                            }
                         }
-                    }
+                        .first { it !is ConnectionState.Connected && it !is ConnectionState.Connecting }
                 } catch (e: Throwable) {
                     ServiceLocator.logger.warn("connection dropped: ${e.message}")
                     setConnection(

@@ -10,8 +10,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -71,6 +74,24 @@ public class AcpClient(
 
     private var pump: Job? = null
 
+    private val _live = MutableStateFlow(false)
+
+    /**
+     * Whether this client still believes it has a working transport.
+     *
+     * True from a successful [start] until the pump ends or a send fails, and
+     * never again after that — a client is single-use, and reconnecting means a
+     * new transport and a new client.
+     *
+     * It exists because a dropped socket used to be invisible to everything above
+     * here: the pump caught the failure, logged one line and stopped, so a
+     * [dev.kiro.core.session.BridgeGateway] went on reporting `Connected` over a
+     * dead connection and the user learned about it from the raw OS text of the
+     * next failed send ("Software caused connection abort"). A `StateFlow` rather
+     * than an event so a collector that subscribes late still sees the truth.
+     */
+    public val live: StateFlow<Boolean> = _live.asStateFlow()
+
     /**
      * Connects the transport and starts pumping [AcpTransport.incoming].
      *
@@ -82,6 +103,7 @@ public class AcpClient(
     public suspend fun start() {
         if (pump != null) return
         transport.connect()
+        _live.value = true
         pump = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 transport.incoming.collect { message -> dispatch(message) }
@@ -94,6 +116,10 @@ public class AcpClient(
                 // scope, since nothing joins this fire-and-forget pump job.
                 logger.warn("transport closed: ${e.message}")
             } finally {
+                // Assigned rather than emitted: this runs on a cancelled coroutine
+                // when close() is what ended the pump, and a suspending emit there
+                // would itself throw before anyone was told.
+                _live.value = false
                 failAllPending(TransportClosedException("transport closed"))
             }
         }
@@ -141,7 +167,7 @@ public class AcpClient(
         pendingLock.withLock { pending[id] = waiter }
 
         try {
-            transport.send(RpcRequest(id, method, params))
+            send(RpcRequest(id, method, params))
         } catch (t: Throwable) {
             pendingLock.withLock { pending.remove(id) }
             throw t
@@ -159,19 +185,41 @@ public class AcpClient(
     }
 
     public suspend fun notify(method: String, params: JsonElement? = null) {
-        transport.send(RpcNotification(method, params))
+        send(RpcNotification(method, params))
     }
 
     /** Answers a server-initiated request. */
     public suspend fun respond(request: RpcRequest, result: JsonElement) {
-        transport.send(RpcResponse(request.id, result = result))
+        send(RpcResponse(request.id, result = result))
     }
 
     public suspend fun respondWithError(request: RpcRequest, error: RpcError) {
-        transport.send(RpcResponse(request.id, error = error))
+        send(RpcResponse(request.id, error = error))
+    }
+
+    /**
+     * The single send path, so a failure marks the client dead exactly once.
+     *
+     * A failed write is usually the *first* thing to notice a half-open socket:
+     * the read side can sit there for minutes with nothing to report, which is
+     * why "Software caused connection abort" on send used to be the first the
+     * user heard of a connection that had been gone for a while. Clearing [live]
+     * here is what turns the next attempt into a reconnect instead of a second
+     * identical error.
+     */
+    private suspend fun send(message: RpcMessage) {
+        try {
+            transport.send(message)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            _live.value = false
+            throw t
+        }
     }
 
     public suspend fun close() {
+        _live.value = false
         pump?.cancel()
         pump = null
         failAllPending(TransportClosedException("client closed"))

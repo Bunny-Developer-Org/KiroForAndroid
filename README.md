@@ -4,7 +4,7 @@ An unofficial Android client for [Kiro](https://kiro.dev) **cloud sessions** —
 
 ## Status, at a glance
 
-Of the 26 items in [docs/FEATURES.md](docs/FEATURES.md): **7 done, 5 partial, the rest not started.** Done: project scaffold/CI, the ACP protocol layer, the session gateway, credential storage, session list (delete/pin), the prompt composer. Partial: bridge pairing (multi-bridge list works, QR scan doesn't), the new-session flow, transcript rendering, permission/approval UI, and reconnect/replay hardening.
+Of the 28 items in [docs/FEATURES.md](docs/FEATURES.md): **8 done, 6 partial, the rest not started.** Done: project scaffold/CI, the ACP protocol layer, the session gateway, credential storage, session list (delete/pin), the prompt composer, and the two new-session defects reported from a phone on 2026-09-04 (missing model picker; a dropped socket nothing noticed). Partial: bridge pairing (multi-bridge list works, QR scan doesn't), the new-session flow, transcript rendering, permission/approval UI, reconnect/replay hardening, and the 2026-09-03 on-device defect sweep (5 of 6, the sixth blocked upstream).
 
 **The one caveat that matters more than any of those markers:** everything above was built and verified against `FakeGateway` or a local `kiro-cli` session. **Nothing has yet been exercised against a real, paid cloud-session creation** — that costs credits, and none have been spent. Session creation, the approval round-trip, and reconnect-mid-turn replay are the three biggest remaining unknowns, and they're exactly the parts a phone client can't fake its way past.
 

@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
+import java.util.concurrent.TimeUnit
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -99,7 +100,31 @@ class WebSocketAcpTransport(
     companion object {
         private const val HEADER_TOKEN = "X-Kiro-Bridge-Token"
 
+        /**
+         * Matches the bridge's own `webSocketPingPeriod` (BridgeConfig, 20s), so
+         * both ends probe on the same cadence and neither has to guess.
+         */
+        private const val PING_INTERVAL_SECONDS = 20L
+
         fun defaultClient(): HttpClient = HttpClient(io.ktor.client.engine.okhttp.OkHttp) {
+            engine {
+                // Keepalive is load-bearing, not tuning. The bridge is reached
+                // through a Cloudflare tunnel (docs/HOSTING.md) and the phone's
+                // carrier NAT, both of which drop an idle connection within a
+                // couple of minutes, and Doze can freeze the socket outright with
+                // the screen off. The ping does two jobs: it keeps the path warm,
+                // and -- since OkHttp fails a socket whose ping goes unanswered --
+                // it is what makes a half-open connection *detectable* at all.
+                // Without it the read side notices nothing and the first symptom
+                // is "failed to send: Software caused connection abort" the next
+                // time the user taps something.
+                //
+                // Set on the OkHttp client rather than through `install(WebSockets)
+                // { pingIntervalMillis }`: Ktor 3.5.2's OkHttp engine never reads
+                // the plugin's value (verified -- `OkHttpEngine`'s bytecode has no
+                // reference to it), so configuring it there would be silently inert.
+                config { pingInterval(PING_INTERVAL_SECONDS, TimeUnit.SECONDS) }
+            }
             install(WebSockets)
         }
     }

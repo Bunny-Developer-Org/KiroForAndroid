@@ -4,6 +4,7 @@ import android.content.Context
 import dev.kiro.android.platform.AndroidLogger
 import dev.kiro.android.platform.CustomTabBrowserLauncher
 import dev.kiro.android.platform.DataStoreBridgeRegistry
+import dev.kiro.android.platform.DataStoreModelCatalogStore
 import dev.kiro.android.platform.DataStorePinnedSessionStore
 import dev.kiro.android.platform.DataStoreRecentRepoStore
 import dev.kiro.android.platform.InMemoryDriftMetrics
@@ -18,6 +19,7 @@ import dev.kiro.core.auth.TokenStore
 import dev.kiro.core.session.BridgeGateway
 import dev.kiro.core.session.CloudSessionGateway
 import dev.kiro.core.session.FakeGateway
+import dev.kiro.core.session.ModelCatalogStore
 import dev.kiro.core.session.RecentRepoStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,6 +47,7 @@ object ServiceLocator {
     val bridges: BridgeRegistry by lazy { DataStoreBridgeRegistry(appContext) }
     val pinnedSessions: PinnedSessionStore by lazy { DataStorePinnedSessionStore(appContext) }
     val recentRepos: RecentRepoStore by lazy { DataStoreRecentRepoStore(appContext) }
+    val modelCatalog: ModelCatalogStore by lazy { DataStoreModelCatalogStore(appContext) }
     val browser by lazy { CustomTabBrowserLauncher(appContext) }
     val connectivityObserver by lazy { ConnectivityObserver(appContext) }
 
@@ -79,7 +82,7 @@ object ServiceLocator {
         // authenticated by KIRO_API_KEY was refused for cloud sessions on a Pro+
         // account on 2026-09-03 (two keys, docs/AUTHENTICATION.md §3b), so blaming
         // the plan first — as this used to — sends the reader the wrong way.
-        val gateway = BridgeGateway(client, scope, logger, metrics, authMode)
+        val gateway = BridgeGateway(client, scope, logger, metrics, authMode, modelCatalog)
         try {
             gateway.connect()
         } catch (e: Throwable) {

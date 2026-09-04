@@ -194,7 +194,7 @@ Read [AUTHENTICATION.md](AUTHENTICATION.md) in full before starting any of these
 - **Done when:** the list reflects real status, survives rotation and process death, and handles the empty state as an invitation to create a session rather than a blank screen. **Shipped 2026-09-02**: delete (confirmation dialog, wired to the already-working `gateway.deleteSession`) and pin (client-local, DataStore-persisted, sorted to top) via a new `SessionListViewModel` that also fixes the rotation/process-death survival gap by replacing the old `remember{}` state in `AppNavigation`.
 - **Depends on:** F-05. Can be built against `FakeGateway` before F-03 lands.
 
-### F-11 · New Cloud Session flow · `L` · 🟡 **PARTIAL** — repo multi-select, manual entry, mode, first prompt and the documented failure messages done; all three ADR-004 §5 picker layers now present (catalog, MRU-derived recents, and manual entry with removable pills — the previously-missing recents layer and the previously-invisible manual pill are both shipped 2026-09-02); not exercised against a real create (spends credits)
+### F-11 · New Cloud Session flow · `L` · 🟡 **PARTIAL** — repo multi-select, manual entry, mode, model (added 2026-09-04, F-26), first prompt and the documented failure messages done; all three ADR-004 §5 picker layers now present (catalog, MRU-derived recents, and manual entry with removable pills — the previously-missing recents layer and the previously-invisible manual pill are both shipped 2026-09-02); not exercised against a real create (spends credits)
 **The headline feature.** The whole reason the app exists.
 
 - **Do:** a create flow with — repository multi-select from the user's connected GitHub/GitLab account (removable pills, matching how other Kiro surfaces present bound repos); model selection; autonomy level (**Autopilot** or **Autonomous** only — Supervised does not exist for cloud sessions); first-prompt composer; submit, provision, and land in the live transcript.
@@ -223,7 +223,55 @@ Read [AUTHENTICATION.md](AUTHENTICATION.md) in full before starting any of these
 - **Done when:** an approval can be granted or denied from the phone and the agent proceeds; a pending approval is never silently buried below the scroll; a free-text agent question can be answered or dismissed. **Still open:** the pre-replay pending-approval check was not addressed by this round and applies to both channels, not just userInput.
 - **Depends on:** F-12. Payload shape is pinned by [`prompt-turn-with-permission.jsonl`](../core/src/test/resources/fixtures/prompt-turn-with-permission.jsonl).
 
-### F-15 · Connection lifecycle: foreground service, reconnect, replay · `L` · 🟡 **PARTIAL** — foreground service (manifest-declared 2026-09-02, was silently missing before), jittered backoff wired to the live reconnect loop, connectivity-regained eager retry, and the bridge-side replay log done; `_bridge/resume` incremental replay is not
+### F-26 · New-session defects found on-device (2026-09-04) · `M` · ✅ **DONE 2026-09-04**
+Two defects reported from a phone against the live bridge, both on the
+create-session path. Grouped because the second is what the first ran into.
+
+- **Do:**
+  1. **No model selector on the create screen.** The mode pills were there and
+     the model was not, so a session always started on whatever the sandbox
+     defaulted to and the only way to change it was to open the transcript
+     afterwards. Note this is *not* the same gap as F-25.3, which was the
+     transcript's picker. Shipped first as a row of pills, which cost four
+     lines and pushed First prompt and Start session off the first screen —
+     the same mistake F-25.1 had already collapsed the repository picker to
+     fix. Now a closed dropdown, sharing `ModelChoiceRow` with the transcript's
+     picker and the disclosure animation with the repository one.
+  2. **`Start session` failed with `Could not start the session: failed to
+     send: Software caused connection abort`.** The operating system's own
+     words for a socket that had died some time earlier, surfaced verbatim.
+- **Root cause of 2, which was one bug in three places:** the WebSocket had no
+  keepalive, so a Cloudflare tunnel, carrier NAT or Doze could reap it and
+  nothing on the phone noticed; `AcpClient`'s pump caught the dead socket,
+  logged one line and stopped, telling nothing above it; and `MainActivity`'s
+  reconnect loop waited on `gateway.connection` with a `collect`, which — over a
+  `StateFlow` that never completes — could not return, so the backoff beneath it
+  was unreachable. The app stayed on a dead gateway until it was force-quit.
+- **Done when:** a create screen offers models with their credit multipliers
+  before a session exists; a dropped socket is detected within seconds and
+  reconnects on its own; and a create attempted across a drop says so in words
+  the operator can act on. **Shipped 2026-09-04:** a 20s OkHttp `pingInterval`
+  matching the bridge's own `webSocketPingPeriod` (set on the OkHttp client —
+  Ktor 3.5.2's OkHttp engine does not read the WebSockets plugin's
+  `pingIntervalMillis`, verified against `OkHttpEngine`'s bytecode);
+  `AcpClient.live` published from both the pump's exit and a failed send, since
+  a half-open socket usually fails a write before the read side notices;
+  `BridgeGateway` republishing that as `ConnectionState.Disconnected`; the
+  reconnect loop returning on the first non-live state; a `Model` section on the
+  create screen sending `CreateSessionRequest.modelId`; and a new
+  [`ModelCatalogStore`](../core/src/main/kotlin/dev/kiro/core/session/ModelCatalogStore.kt)
+  because nothing in the protocol lists models without a session
+  (PROTOCOL-FINDINGS §4d) — without persistence the picker was empty on every
+  cold start. The create screen also stopped being rebuilt around the gateway
+  instance, so a reconnect no longer discards a half-filled form.
+- **Verified:** `:core:corePurityCheck`, `detekt`, all three test suites and
+  `:app:assembleDebug` pass; the model picker was rendered and exercised on an
+  emulator against `FakeGateway`. ***Unverified:*** neither fix has been run
+  against the live bridge or a real cloud create (spends credits), so the
+  reconnect path is pinned by unit tests rather than by a reproduction of the
+  original abort.
+
+### F-15 · Connection lifecycle: foreground service, reconnect, replay · `L` · 🟡 **PARTIAL** — foreground service (manifest-declared 2026-09-02, was silently missing before), jittered backoff wired to the live reconnect loop, connectivity-regained eager retry, socket-drop detection and keepalive (2026-09-04, F-26), and the bridge-side replay log done; `_bridge/resume` incremental replay is not
 The item that decides whether the app is trustworthy. A session that dies when the phone locks is a broken client regardless of how good the UI looks.
 
 - **Do:** a `dataSync` foreground service for active turns; exponential backoff with jitter; eager reconnect on connectivity-regained; a replay protocol — **check F-03's decision first**, since `_meta.kiro.messageId` may make the `lastSeq` scheme in [ACP-INTEGRATION §7](ACP-INTEGRATION.md#7-reconnect-and-replay--our-design-not-kiros) unnecessary; explicit handling of Android 15's 6h/24h `dataSync` cap including `onTimeout()`; Doze-aware behaviour.

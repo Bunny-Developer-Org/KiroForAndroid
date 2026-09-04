@@ -9,6 +9,7 @@ import dev.kiro.core.acp.RpcNotification
 import dev.kiro.core.acp.RpcRequest
 import dev.kiro.core.acp.RpcResponse
 import dev.kiro.core.auth.PairedBridge
+import dev.kiro.core.model.KiroModel
 import dev.kiro.core.model.ModelSelection
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -486,5 +487,128 @@ class BridgeGatewayTest {
                 )
             },
         )
+    }
+
+    /**
+     * Regression test for the drop nothing acted on.
+     *
+     * `AcpClient`'s pump caught the dead socket, logged one line and stopped.
+     * Nothing above it was told, so this gateway kept publishing `Connected` and
+     * the app's reconnect loop -- which waits on exactly this flow -- never woke
+     * up. The connection stayed dead until the process was restarted, and the
+     * only symptom was "failed to send: Software caused connection abort" on
+     * whatever the user tapped next.
+     */
+    @Test
+    fun `a dropped transport is published as Disconnected`() = runTest {
+        val transport = FakeTransport()
+        val client = AcpClient(transport, backgroundScope)
+        val gateway = BridgeGateway(client, backgroundScope)
+
+        val connectJob = async { gateway.connect() }
+        runCurrent()
+        val initRequest = transport.sent.filterIsInstance<RpcRequest>()
+            .single { it.method == AcpMethods.INITIALIZE }
+        transport.inbound.send(
+            RpcResponse(initRequest.id, result = buildJsonObject { put("protocolVersion", 1) }),
+        )
+        runCurrent()
+        connectJob.await()
+
+        val states = mutableListOf<ConnectionState>()
+        backgroundScope.launch { gateway.connection.toList(states) }
+        runCurrent()
+        assertTrue(states.last() is ConnectionState.Connected)
+
+        transport.inbound.close()
+        runCurrent()
+
+        assertEquals(ConnectionState.Disconnected, states.last())
+    }
+
+    /**
+     * The create screen has to offer models before a session exists, and the
+     * protocol gives it no way to ask: models are only ever listed against a
+     * session (PROTOCOL-FINDINGS §4d). A remembered catalogue is the whole
+     * answer, so it has to survive the round trip in both directions.
+     */
+    @Test
+    fun `a remembered catalogue is loaded on connect and refreshed from the agent`() = runTest {
+        val remembered = listOf(KiroModel("auto", "Auto", null))
+        val store = RecordingModelCatalogStore(remembered)
+        val transport = FakeTransport()
+        val client = AcpClient(transport, backgroundScope)
+        val gateway = BridgeGateway(client, backgroundScope, modelCatalogStore = store)
+
+        val connectJob = async { gateway.connect() }
+        runCurrent()
+        val initRequest = transport.sent.filterIsInstance<RpcRequest>()
+            .single { it.method == AcpMethods.INITIALIZE }
+        transport.inbound.send(
+            RpcResponse(initRequest.id, result = buildJsonObject { put("protocolVersion", 1) }),
+        )
+        runCurrent()
+        connectJob.await()
+
+        val catalogues = mutableListOf<ModelState>()
+        backgroundScope.launch { gateway.models.toList(catalogues) }
+        runCurrent()
+        assertEquals(remembered, catalogues.last().lastKnownCatalog)
+
+        transport.inbound.send(modelConfigNotification("s-1", "claude-opus-5"))
+        runCurrent()
+
+        assertEquals(listOf("claude-opus-5"), catalogues.last().lastKnownCatalog.map { it.id })
+        // Written back, so the next cold start opens the create screen with a
+        // list rather than an apology.
+        assertEquals(listOf(listOf("claude-opus-5")), store.written.map { models -> models.map { it.id } })
+    }
+
+    /** A `config_option_update` carrying one `model` select. */
+    private fun modelConfigNotification(sessionId: String, modelId: String) = RpcNotification(
+        method = AcpMethods.SESSION_UPDATE,
+        params = buildJsonObject {
+            put("sessionId", sessionId)
+            put(
+                "update",
+                buildJsonObject {
+                    put("sessionUpdate", "config_option_update")
+                    put(
+                        "configOptions",
+                        buildJsonArray {
+                            add(
+                                buildJsonObject {
+                                    put("id", "model")
+                                    put("name", "Model")
+                                    put("currentValue", modelId)
+                                    put(
+                                        "options",
+                                        buildJsonArray {
+                                            add(
+                                                buildJsonObject {
+                                                    put("value", modelId)
+                                                    put("name", "Opus 5")
+                                                },
+                                            )
+                                        },
+                                    )
+                                },
+                            )
+                        },
+                    )
+                },
+            )
+        },
+    )
+
+    /** Starts with a remembered catalogue and records everything written back. */
+    private class RecordingModelCatalogStore(
+        private val initial: List<KiroModel>,
+    ) : ModelCatalogStore {
+        val written = mutableListOf<List<KiroModel>>()
+        override suspend fun read(): List<KiroModel> = initial
+        override suspend fun write(models: List<KiroModel>) {
+            written += models
+        }
     }
 }
