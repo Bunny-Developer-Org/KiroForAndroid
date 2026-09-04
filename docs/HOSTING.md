@@ -132,9 +132,13 @@ Limitations worth knowing before you commit to it:
   than dropping the page during a transient Cloudflare blip.
 - A short Access session lifetime can bounce you to a login mid-refresh.
 
-**Unverified (2026-09-04):** the bridge side is tested end to end against a local
-JWKS, but no Access application has been created against a real Zero Trust
-account, and nobody has scanned one of these pages with a phone.
+**Verified end to end on 2026-09-04**, against this project's own bridge: an Access
+application scoped to `bridge.bunnydeveloper.dev/qr` with a Google policy, the two
+environment variables set on the VM, and a real Pixel 8a scanning the page and
+pairing — after which the phone connected to `/acp` and the bridge logged the
+client attaching. `POST /pair` was confirmed still reachable with no Access
+session at the same time, which is the check that proves the application did not
+swallow the whole hostname.
 
 ### Pairing a phone to a bridge that is already running
 
@@ -546,10 +550,10 @@ this without owning a domain.
   retired, a second bridge on the same state directory was refused, and the
   refusal left the running bridge's socket intact. That last one was a genuine
   bug the unit tests missed and only running the binary caught. **What has not
-  been verified is a phone camera actually reading one of these QR codes**, or
-  any of it running on the GCE VM with `KIRO_BRIDGE_PUBLIC_URL` set. The QR's
-  polarity and module fidelity are pinned by tests and were checked by rendering
-  one to an image; that is not the same as a scan.
+  **that gap is now closed too**: on 2026-09-04 a real Pixel 8a scanned a QR from
+  the Access-gated `/qr` page on the GCE VM, with `KIRO_BRIDGE_PUBLIC_URL` set,
+  and paired — the phone then connected to `/acp`. The QR's polarity and module
+  fidelity are pinned by tests as well, but the scan is what settles it.
 - **`kiro-cli`'s installer is large.** Its own zip is ~600 MB compressed
   (~1 GB installed across `kiro-cli`, `kiro-cli-chat`, and `kiro-cli-term`),
   found by inspecting the real installer while writing this. That's the

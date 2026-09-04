@@ -19,10 +19,11 @@
 # one line after a tunnel had actually been created. The rest of the path -
 # login, create, route dns, config, systemd unit - is now verified end to end.
 #
-# NOT verified (2026-09-04): the Cloudflare Access steps this script now prints
-# at the end, for the /qr pairing page. The bridge side of that is tested, but
-# no Access application has been created against a real Zero Trust account, so
-# treat those instructions as reviewed rather than exercised.
+# The Cloudflare Access steps this script prints at the end, for the /qr pairing
+# page, were followed for real on 2026-09-04: an application scoped to the /qr
+# path with a Google policy, the two environment variables set on the VM, and a
+# phone paired by scanning the page. /pair stayed reachable without an Access
+# session throughout, which is the thing path-scoping exists to protect.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
