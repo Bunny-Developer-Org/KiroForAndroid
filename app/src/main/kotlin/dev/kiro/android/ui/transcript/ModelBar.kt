@@ -168,7 +168,7 @@ private fun ModelRefusal(failed: ModelChange.Failed, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun RateBadge(model: KiroModel?) {
+internal fun RateBadge(model: KiroModel?) {
     val colors = KiroTheme.colors
     val rate = formatRate(model?.rateMultiplier, model?.rateUnit) ?: return
     Text(
@@ -235,11 +235,18 @@ private fun ModelPickerDialog(
     )
 }
 
+/**
+ * One row of a model list.
+ *
+ * `internal` and shared with the create screen's own model dropdown: both are
+ * choosing from the same catalogue, and a user who learns to read the rate badge
+ * in one should not meet a different layout in the other.
+ */
 @Composable
-private fun ModelChoiceRow(
+internal fun ModelChoiceRow(
     model: KiroModel,
     selected: Boolean,
-    enabled: Boolean,
+    enabled: Boolean = true,
     onSelect: () -> Unit,
 ) {
     val colors = KiroTheme.colors

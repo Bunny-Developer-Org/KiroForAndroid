@@ -232,7 +232,11 @@ create-session path. Grouped because the second is what the first ran into.
      the model was not, so a session always started on whatever the sandbox
      defaulted to and the only way to change it was to open the transcript
      afterwards. Note this is *not* the same gap as F-25.3, which was the
-     transcript's picker.
+     transcript's picker. Shipped first as a row of pills, which cost four
+     lines and pushed First prompt and Start session off the first screen —
+     the same mistake F-25.1 had already collapsed the repository picker to
+     fix. Now a closed dropdown, sharing `ModelChoiceRow` with the transcript's
+     picker and the disclosure animation with the repository one.
   2. **`Start session` failed with `Could not start the session: failed to
      send: Software caused connection abort`.** The operating system's own
      words for a socket that had died some time earlier, surfaced verbatim.
