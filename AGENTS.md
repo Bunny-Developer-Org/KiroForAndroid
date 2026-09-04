@@ -143,6 +143,26 @@ Taken verbatim in substance from [`docs/FEATURES.md` § How to pick up an item](
 
 ---
 
+<!-- skill-issue:sentinel:start -->
+## Sentinel quality gate
+
+For every bug fix, feature improvement, behavior-changing refactor, schema/API
+change, or deployment/CI/runtime configuration change:
+
+1. Record the starting Git boundary before implementation.
+2. Complete focused implementation and tests.
+3. Run `.agents/skills/sentinel/SKILL.md` against the exact task change set.
+4. Apply P1 and in-scope P2 findings, rerun affected checks, and run Sentinel
+   again.
+5. Do not declare completion without the Sentinel attestation.
+
+Use `.agents/skills/sentinel/CHECKLIST.md` for this repository's architecture,
+quality, security, and deployment contracts. Sentinel reports are local
+evidence under `.sentinel/reviews/` and are excluded from Git.
+<!-- skill-issue:sentinel:end -->
+
+---
+
 ## 7. Pitfalls, each with its evidence
 
 - **`kiro-cli acp` must be started with `--agent-engine v3 --auth-method cli`.** The default engine is local-only and cannot see cloud sessions *at all* — a client using default flags would wrongly conclude the whole approach is dead. ([ACP-INTEGRATION](docs/ACP-INTEGRATION.md) opening note, [PROTOCOL-FINDINGS §2](docs/PROTOCOL-FINDINGS.md).)
