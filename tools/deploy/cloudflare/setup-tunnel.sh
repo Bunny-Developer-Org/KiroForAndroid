@@ -88,10 +88,15 @@ tunnel: $TUNNEL_ID
 credentials-file: $CONFIG_DIR/$TUNNEL_ID.json
 
 ingress:
-  # http, not ws: this origin serves ordinary GETs (/ and /qr) as well as the
-  # /acp WebSocket, and WebSocket is proxied transparently for an http(s) origin
-  # anyway — no separate flag needed (Cloudflare has done this by default since
-  # 2022). The previous \`ws://\` worked but contradicted the sentence above it.
+  # http://, NOT ws://, and that distinction is load-bearing. Cloudflare proxies
+  # a WebSocket upgrade transparently over an http(s) origin, so \`ws://\` buys
+  # nothing — and it actively breaks the rest: with \`service: ws://…\` the edge
+  # answers plain HTTP requests with **530** without ever reaching the origin.
+  # The bridge serves plain HTTP routes too — \`POST /pair\`, and since F-30 also
+  # \`GET /\` and \`GET /qr\` — so pairing failed with "the bridge refused the
+  # pairing request" while the bridge logged nothing at all, because the request
+  # never arrived. Verified on 2026-09-03: the WebSocket handshake succeeded
+  # through a ws:// ingress and POST /pair returned 530; both work through http://.
   - hostname: $HOSTNAME
     service: http://$BRIDGE_HOST:$BRIDGE_PORT
   - service: http_status:404
