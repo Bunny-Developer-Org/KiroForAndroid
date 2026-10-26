@@ -30,7 +30,11 @@ services:
     # just scoped to the compose network instead of localhost.
 
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    # Pinned, not :latest — a restarted container reuses its cached image, so
+    # :latest would not pick up the 2026.10.2+ fix (emSign intermediate
+    # distrust, Cloudflare notice of 2026-10-20). `docker compose pull` after
+    # bumping this tag, then `up -d`.
+    image: cloudflare/cloudflared:2026.10.3
     restart: unless-stopped
     command: tunnel run
     environment:

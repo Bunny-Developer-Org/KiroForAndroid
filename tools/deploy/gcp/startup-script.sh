@@ -164,11 +164,19 @@ systemctl daemon-reload
 if ! id cloudflared >/dev/null 2>&1; then
   useradd --create-home --shell /usr/sbin/nologin cloudflared
 fi
-if [ ! -x /usr/local/bin/cloudflared ]; then
+# Minimum 2026.10.2 (2026.10.3 for non-Homebrew macOS, not relevant here):
+# earlier cloudflared trusts the compromised eMudhra/emSign intermediates
+# (Cloudflare notice, 2026-10-20). An existing older binary is replaced too,
+# not just a missing one. Not exercised on a VM yet.
+CLOUDFLARED_VERSION=2026.10.3
+CLOUDFLARED_MIN=2026.10.2
+have="$(/usr/local/bin/cloudflared --version 2>/dev/null | sed -n 's/.*version \([0-9.]*\).*/\1/p')"
+if [ -z "$have" ] || [ "$(printf '%s\n%s\n' "$CLOUDFLARED_MIN" "$have" | sort -V | head -n1)" != "$CLOUDFLARED_MIN" ]; then
   if curl -fsSL -o /usr/local/bin/cloudflared.tmp \
-       https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64; then
+       "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64"; then
     chmod 0755 /usr/local/bin/cloudflared.tmp
     mv /usr/local/bin/cloudflared.tmp /usr/local/bin/cloudflared
+    systemctl try-restart cloudflared.service 2>/dev/null || true
   else
     rm -f /usr/local/bin/cloudflared.tmp
     echo "WARNING: could not download cloudflared. The IAP/SSH path is unaffected;"

@@ -39,6 +39,15 @@ if ! command -v cloudflared >/dev/null 2>&1; then
   exit 1
 fi
 
+# cloudflared < 2026.10.2 trusts compromised eMudhra/emSign intermediates
+# (Cloudflare notice, 2026-10-20). Refuse rather than set up a tunnel on it.
+CF_MIN=2026.10.2
+CF_HAVE="$(cloudflared --version 2>/dev/null | sed -n 's/.*version \([0-9.]*\).*/\1/p')"
+if [ -z "$CF_HAVE" ] || [ "$(printf '%s\n%s\n' "$CF_MIN" "$CF_HAVE" | sort -V | head -n1)" != "$CF_MIN" ]; then
+  echo "cloudflared ${CF_HAVE:-unknown} is too old; need >= $CF_MIN. Upgrade it (same package manager you installed with), then re-run." >&2
+  exit 1
+fi
+
 if [ -z "$HOSTNAME" ]; then
   echo "Set HOSTNAME to the public hostname you want, e.g. bridge.example.com" >&2
   echo "It must be a hostname on a domain already added to your Cloudflare account" >&2
